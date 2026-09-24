@@ -4,8 +4,10 @@ import { SESSION_COOKIE, verifySessionToken } from "@/core/auth"
 
 export const config = {
   runtime: "nodejs",
-  // upload fica de fora (corpo de ~250 MB não pode passar pelo middleware); ele checa a sessão no próprio handler
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/upload|api/auth/login|login).*)"],
+  // Rotas com corpo ficam de fora e checam a sessão no próprio handler: upload (~250 MB) e commands (fila grande).
+  // Bug do Next 15.5: com middleware Node, corpo que chega em pedaços pela rede dá 500
+  // ("Response body object should not be disturbed or locked") — fila de 400+ casos já passa disso.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/upload|api/commands|api/auth/login|login).*)"],
 }
 
 export async function middleware(req: NextRequest) {
