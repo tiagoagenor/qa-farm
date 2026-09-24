@@ -39,7 +39,7 @@ describe("fixCaseLinks", () => {
 
     // Assert
     const readable = await fs.readFile(path.join(root, "elements/Investimentos/BolsaFacil/favoritos.py"), "utf8")
-    expect([links.sort(), readable]).toEqual([["elements/Investimentos", "elements/investimentos/BolsaFacil"], "X = 1"])
+    expect([links.sort(), readable]).toEqual([["elements/Investimentos", "elements/Investimentos/BolsaFacil"], "X = 1"])
   })
 
   it("não mexe em imports que já funcionam", async () => {
