@@ -205,7 +205,8 @@ launch_one() {  # $1 = índice
   (( COLD )) && args+=(-no-snapshot-load)
   (( WIPE )) && args+=(-wipe-data)
 
-  nohup "$EMU" "${args[@]}" >"$log" 2>&1 &
+  # setsid: o emulador ganha sessão própria — sobrevive ao fim de quem o iniciou (terminal, runner, deploy)
+  setsid nohup "$EMU" "${args[@]}" >"$log" 2>&1 < /dev/null &
   echo $! > "$RUN_DIR/$name.pid"
   info "$name iniciando -> $(serial "$i") (adb 127.0.0.1:$(adb_port "$i"), log $log)"
 }

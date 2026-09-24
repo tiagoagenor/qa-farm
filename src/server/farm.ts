@@ -49,9 +49,11 @@ export function realFarm(cfg: Config): Farm {
               : [down]
       const out = fs.openSync(logFile, "a")
       fs.writeSync(out, `\n=== ${new Date().toISOString()} ${describeOp(op)}\n`)
+      // detached: grupo de processos próprio — reiniciar o runner (kill no grupo dele) não derruba os emuladores
       const child = spawn("flock", [lock, "bash", ...args], {
         stdio: ["ignore", out, out],
         env: { ...process.env, FARM_HOME: cfg.farmHome, ANDROID_SDK_ROOT: cfg.sdkRoot },
+        detached: true,
       })
       fs.closeSync(out)
       return new Promise((resolve) => {
