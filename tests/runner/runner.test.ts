@@ -143,6 +143,101 @@ describe("runner (modo fake)", () => {
     ])
   })
 
+  it("aparelho físico ativado recebe o app e passa a receber casos", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 0, physical: ["FAKE-PHYSICAL-01"] })
+    await h.tickUntil(() => h.runner.snapshotForTests().devices.length === 1 || undefined)
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+
+    // Act
+    const res = await h.command({ type: "set_physical", serial: "FAKE-PHYSICAL-01", enabled: true })
+    const created = await h.command({ type: "create_queue", input: queueInput(ids) })
+    const q = await h.tickUntil(() => {
+      const live = liveQueue(created.data!.queueId as string)
+      return finished(live) ? live : undefined
+    })
+
+    // Assert
+    const d = h.runner.snapshotForTests().devices[0]
+    expect([res.ok, q.items[0].attempts[0].serial, q.items[0].status, d.enabled, d.appVersionCode, d.index]).toEqual([
+      true,
+      "FAKE-PHYSICAL-01",
+      "passed",
+      true,
+      5528,
+      51,
+    ])
+  })
+
+  it("aparelho físico não tem as configurações do sistema alteradas", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 0, physical: ["FAKE-PHYSICAL-01"] })
+    await h.tickUntil(() => h.runner.snapshotForTests().devices.length === 1 || undefined)
+
+    // Act
+    await h.command({ type: "set_physical", serial: "FAKE-PHYSICAL-01", enabled: true })
+    await h.tickUntil(() => h.runner.snapshotForTests().devices[0]?.state === "ready" || undefined)
+
+    // Assert
+    const { readWorld } = await import("@/server/fake-world")
+    expect((await readWorld(h.dataDir)).devices[0].settings).toBeUndefined()
+  })
+
+  it("desativar o aparelho físico devolve ele para externo", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 0, physical: ["FAKE-PHYSICAL-01"] })
+    await h.tickUntil(() => h.runner.snapshotForTests().devices.length === 1 || undefined)
+    await h.command({ type: "set_physical", serial: "FAKE-PHYSICAL-01", enabled: true })
+    await h.tickUntil(() => h.runner.snapshotForTests().devices[0]?.state === "ready" || undefined)
+
+    // Act
+    const res = await h.command({ type: "set_physical", serial: "FAKE-PHYSICAL-01", enabled: false })
+    await h.tickUntil(() => h.runner.snapshotForTests().devices[0]?.state === "external" || undefined)
+
+    // Assert
+    const saved = JSON.parse(await fs.readFile(h.p.physical, "utf8"))
+    expect([res.ok, h.runner.snapshotForTests().devices[0].enabled, saved]).toEqual([true, false, { enabled: {} }])
+  })
+
+  it("desativar aparelho físico com caso rodando é recusado", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 0, physical: ["FAKE-PHYSICAL-01"] })
+    await h.tickUntil(() => h.runner.snapshotForTests().devices.length === 1 || undefined)
+    await h.command({ type: "set_physical", serial: "FAKE-PHYSICAL-01", enabled: true })
+    await h.command({ type: "create_queue", input: queueInput(await h.catalogIds((n) => n.includes("TIMEOUT")), { timeoutSec: 600 }) })
+    await h.tickUntil(() => h.runner.snapshotForTests().running.length === 1 || undefined)
+
+    // Act
+    const res = await h.command({ type: "set_physical", serial: "FAKE-PHYSICAL-01", enabled: false })
+
+    // Assert
+    expect([res.ok, res.message]).toEqual([false, "Celular ocupado com um caso; desative quando ele terminar"])
+  })
+
+  it("aparelho físico que desconecta no meio do caso: caso refeito e o aparelho não é reiniciado", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1, physical: ["FAKE-PHYSICAL-01"] })
+    await h.tickUntil(() => h.runner.snapshotForTests().devices.length === 2 || undefined)
+    await h.command({ type: "set_physical", serial: "FAKE-PHYSICAL-01", enabled: true })
+    await h.tickUntil(async () => (await h.readyCount()) === 2 || undefined)
+    await h.world((w) => {
+      w.devices = w.devices.filter((d) => d.kind === "physical")
+    }) // tira o emulador: o caso tem que ir para o físico
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_05-Caso-SLOW-PASS")
+    const created = await h.command({ type: "create_queue", input: queueInput(ids) })
+    await h.tickUntil(() => h.runner.snapshotForTests().running[0]?.serial === "FAKE-PHYSICAL-01" || undefined)
+
+    // Act
+    await h.world((w) => {
+      w.devices = w.devices.filter((d) => d.serial !== "FAKE-PHYSICAL-01")
+    })
+    await h.tickUntil(() => liveQueue(created.data!.queueId as string)!.items[0].attempts[0].status === "infra_error" || undefined)
+
+    // Assert
+    const dev = h.runner.snapshotForTests().devices.find((d) => d.serial === "FAKE-PHYSICAL-01")
+    expect([dev?.state, dev?.enabled, h.logs.some((l) => l.includes("manutenção") && l.includes("FAKE"))]).toEqual(["offline", true, false])
+  })
+
   it("fila roda todos os casos e registra passou, falhou e infra (com re-enfileiramento)", async () => {
     // Arrange
     h = await makeHarness({ emulators: 4 })

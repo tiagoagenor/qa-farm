@@ -18,13 +18,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePoll } from "@/hooks/use-poll"
 import { sendCommand } from "@/lib/client"
@@ -73,6 +74,7 @@ export function DeviceGrid() {
   const [busy, setBusy] = useState(false)
   const devices = data?.devices ?? []
   const emulators = devices.filter((d) => d.kind === "emulator")
+  const physicalOn = devices.filter((d) => d.kind === "physical" && d.enabled).length
 
   async function run(cmd: Parameters<typeof sendCommand>[0]) {
     setBusy(true)
@@ -88,7 +90,7 @@ export function DeviceGrid() {
     <div>
       <PageHeader
         title="Celulares"
-        description={`${emulators.filter((d) => d.state === "ready").length} pronto(s), ${emulators.filter((d) => d.state === "busy").length} ocupado(s) de ${emulators.length} emulador(es)${data?.desired ? ` · alvo: ${data.desired}` : ""}. Cada um tem 2 GB de RAM.`}
+        description={`${emulators.filter((d) => d.state === "ready").length} pronto(s), ${emulators.filter((d) => d.state === "busy").length} ocupado(s) de ${emulators.length} emulador(es)${data?.desired ? ` · alvo: ${data.desired}` : ""}${physicalOn ? ` · ${physicalOn} aparelho(s) físico(s) ativado(s)` : ""}. Cada emulador tem 2 GB de RAM.`}
         actions={
           <>
             <div className="flex items-center gap-2">
@@ -177,9 +179,24 @@ export function DeviceGrid() {
               </CardHeader>
               <CardContent className="grid gap-2 px-4 text-xs">
                 {d.kind === "physical" && (
-                  <Badge variant="outline" className="w-fit">
-                    Externo — não recebe casos
-                  </Badge>
+                  <div className="bg-muted/40 flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                    <div className="grid gap-0.5">
+                      <Label htmlFor={`use-${d.serial}`} className="text-xs font-medium">
+                        Usar nos testes
+                      </Label>
+                      <span className="text-muted-foreground text-[11px]">
+                        {d.enabled ? "Recebe casos das filas" : "Desativado — não recebe casos"}
+                      </span>
+                    </div>
+                    <Switch
+                      id={`use-${d.serial}`}
+                      checked={!!d.enabled}
+                      disabled={busy || (d.enabled && d.state === "busy")}
+                      onCheckedChange={(v) => run({ type: "set_physical", serial: d.serial, enabled: v })}
+                      aria-label={`Usar ${d.serial} nos testes`}
+                      data-testid="physical-switch"
+                    />
+                  </div>
                 )}
                 {d.appVersionCode !== undefined && <p className="text-muted-foreground">App instalado: versionCode {d.appVersionCode}</p>}
                 {d.state === "busy" && d.currentQueueId && (

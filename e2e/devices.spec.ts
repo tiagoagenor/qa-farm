@@ -32,3 +32,19 @@ test("ver tela mostra o print do celular", async ({ page }) => {
   await expect(img).toBeVisible()
   await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true)
 })
+
+test("ativar o aparelho físico coloca ele no conjunto de testes e desativar tira", async ({ page }) => {
+  // Arrange
+  await page.goto("/celulares")
+  const card = page.locator('[data-testid="device-card"][data-serial="FAKE-PHYSICAL-01"]')
+  await expect(card).toHaveAttribute("data-state", "external")
+
+  // Act
+  await card.getByTestId("physical-switch").click()
+  await expect(card).toHaveAttribute("data-state", "ready", { timeout: 30_000 })
+  await card.getByTestId("physical-switch").click()
+
+  // Assert
+  await expect(card).toHaveAttribute("data-state", "external", { timeout: 30_000 })
+  await expect(card.getByTestId("physical-switch")).not.toBeChecked()
+})

@@ -72,6 +72,17 @@ export function parseAdbDevices(text: string): AdbDevice[] {
   })
 }
 
+/** Índices dos aparelhos físicos ativados começam aqui (não colidem com os emuladores 1..18). */
+export const PHYSICAL_BASE_INDEX = 50
+
+/** Próximo índice livre para um aparelho físico. */
+export function nextPhysicalIndex(used: Iterable<number>): number {
+  const taken = new Set(used)
+  let i = PHYSICAL_BASE_INDEX + 1
+  while (taken.has(i)) i++
+  return i
+}
+
 /** Grupo de Appium do emulador: um servidor Appium atende `perGroup` celulares (1..5 → 1, 6..10 → 2...). */
 export function appiumGroup(index: number, perGroup = 5): number {
   return Math.ceil(index / Math.max(1, perGroup))

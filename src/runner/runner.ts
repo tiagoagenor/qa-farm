@@ -4,7 +4,7 @@ import path from "node:path"
 
 import type { Config } from "@/core/config"
 import { newId } from "@/core/ids"
-import { parseAdbDevices, serialFromIndex } from "@/core/parsers/adb-devices"
+import { nextPhysicalIndex, parseAdbDevices, serialFromIndex } from "@/core/parsers/adb-devices"
 import { classifyRun } from "@/core/parsers/robot-output"
 import { dataPaths } from "@/core/paths"
 import { applyResult, buildQueue, cancelQueue, failedTestIds, finalizeIfDone, reopenItem } from "@/core/queue-logic"
@@ -22,6 +22,7 @@ import {
   DesiredSchema,
   type Device,
   type DevicesState,
+  PhysicalStateSchema,
   type Queue,
   QueueSchema,
   type RunnerState,
@@ -48,6 +49,7 @@ interface RunningAttempt {
   timedOut: boolean
   canceled: boolean
   deviceLost: boolean
+  physical: boolean
   timers: NodeJS.Timeout[]
 }
 
@@ -65,6 +67,7 @@ export class Runner {
   private appVersions = new Map<string, number | undefined>() // serial → versionCode instalado
   private installing = new Set<string>()
   private prepared = new Set<string>() // celulares já configurados para testes (diálogos de erro desligados)
+  private physical = new Map<string, number>() // aparelhos físicos ativados: serial → índice fixo
   private maintenance = new Map<number, { since: string; reason: string }>()
   private farmOps: FarmOp[] = []
   private farmBusy = false
@@ -140,6 +143,7 @@ export class Runner {
       if (fixed !== original) this.persistQueue(fixed.id)
     }
     this.desired = (await readJson(this.p.desired, DesiredSchema, { devices: 0 })).devices
+    this.physical = new Map(Object.entries((await readJson(this.p.physical, PhysicalStateSchema, { enabled: {} })).enabled))
     this.catalog = await readJson(this.p.catalog, CatalogSchema.nullable(), null)
     this.catalogStatus = this.catalog ? "ready" : "missing"
     await this.pickActiveApp()
@@ -421,6 +425,26 @@ export class Runner {
         this.restartDevice(d.index, "reinício pedido pelo usuário")
         return { ok: true, message: `Reiniciando ${c.serial}` }
       }
+      case "set_physical": {
+        const d = this.devices.get(c.serial)
+        if (c.enabled) {
+          if (!d) return { ok: false, message: "Aparelho não está conectado" }
+          if (d.kind !== "physical") return { ok: false, message: "Só aparelhos físicos podem ser ativados" }
+          if (!this.physical.has(c.serial)) this.physical.set(c.serial, nextPhysicalIndex(this.physical.values()))
+          await writeJsonAtomic(this.p.physical, { enabled: Object.fromEntries(this.physical) })
+          this.lastDeviceRefresh = 0
+          return { ok: true, message: `${c.serial} ativado: vai receber casos (o app de teste será instalado nele)` }
+        }
+        if ([...this.running.values()].some((r) => r.serial === c.serial)) {
+          return { ok: false, message: "Celular ocupado com um caso; desative quando ele terminar" }
+        }
+        this.physical.delete(c.serial)
+        this.appVersions.delete(c.serial)
+        this.prepared.delete(c.serial)
+        await writeJsonAtomic(this.p.physical, { enabled: Object.fromEntries(this.physical) })
+        this.lastDeviceRefresh = 0
+        return { ok: true, message: `${c.serial} desativado: não recebe mais casos` }
+      }
       case "restart_appiums": {
         if (this.running.size > 0) return { ok: false, message: "Há casos em execução. Pause ou cancele as filas antes." }
         await this.ad.appium.stopAll()
@@ -480,7 +504,7 @@ export class Runner {
         ra.deviceLost = true
         this.log(`celular ${ra.serial} caiu durante ${ra.queueId}/${ra.itemId}`)
         this.kill(ra)
-        this.restartDevice(ra.index, "caiu durante um caso")
+        if (!ra.physical) this.restartDevice(ra.index, "caiu durante um caso") // aparelho físico nunca é reiniciado
       }
     }
 
@@ -497,13 +521,15 @@ export class Runner {
         qemuPid: d.index ? qemu.get(d.index) : undefined,
         updatedAt: now,
       }
-      if (d.kind === "physical") {
-        next.set(d.serial, { ...base, state: "external" })
+      const isPhysical = d.kind === "physical"
+      if (isPhysical && !this.physical.has(d.serial)) {
+        next.set(d.serial, { ...base, state: "external", enabled: false })
         continue
       }
-      const idx = d.index!
+      const idx = isPhysical ? this.physical.get(d.serial)! : d.index!
+      if (isPhysical) Object.assign(base, { index: idx, name: d.model ?? d.serial, enabled: true })
       const ra = busyBySerial.get(d.serial)
-      if (this.maintenance.has(idx)) {
+      if (!isPhysical && this.maintenance.has(idx)) {
         next.set(d.serial, { ...base, state: "maintenance", note: this.maintenance.get(idx)!.reason })
         continue
       }
@@ -521,7 +547,8 @@ export class Runner {
         continue
       }
       if (d.adbState !== "device") {
-        next.set(d.serial, { ...base, state: base.qemuPid ? "booting" : "offline", note: `adb: ${d.adbState}` })
+        const hint = d.adbState === "unauthorized" ? " — autorize a depuração USB no celular" : ""
+        next.set(d.serial, { ...base, state: base.qemuPid ? "booting" : "offline", note: `adb: ${d.adbState}${hint}` })
         continue
       }
       readyChecks.push(
@@ -549,8 +576,9 @@ export class Runner {
             }
           }
           if (!this.prepared.has(d.serial)) {
-            // ANR do System UI no boot deixa um diálogo na tela que bloqueia todos os casos daquele celular
-            await this.ad.adb.putGlobalSetting(d.serial, "hide_error_dialogs", "1")
+            // ANR do System UI no boot deixa um diálogo na tela que bloqueia todos os casos daquele celular.
+            // Aparelho físico: não mexemos nas configurações do sistema dele (só fechamos diálogos antes de cada caso).
+            if (!isPhysical) await this.ad.adb.putGlobalSetting(d.serial, "hide_error_dialogs", "1")
             await this.ad.adb.closeSystemDialogs(d.serial)
             this.prepared.add(d.serial)
           }
@@ -567,6 +595,12 @@ export class Runner {
       if (prev.kind !== "emulator" || !idx || next.has(prev.serial) || this.maintenance.has(idx)) continue
       if (stopping || idx > this.desired || prev.state === "maintenance") continue
       this.restartDevice(idx, "sumiu do adb")
+    }
+
+    // aparelho físico ativado mas desconectado continua visível (e ativado)
+    for (const [serial, idx] of this.physical) {
+      if (next.has(serial)) continue
+      next.set(serial, { serial, kind: "physical", adbState: "missing", index: idx, name: serial, state: "offline", enabled: true, note: "Desconectado do USB", updatedAt: now })
     }
 
     // emuladores em manutenção que nem aparecem no adb continuam visíveis
@@ -675,7 +709,7 @@ export class Runner {
   private async dispatch(): Promise<void> {
     await this.pickActiveApp()
     const free = [...this.devices.values()]
-      .filter((d) => d.kind === "emulator" && d.state === "ready" && d.index && ![...this.running.values()].some((r) => r.serial === d.serial))
+      .filter((d) => (d.kind === "emulator" || d.enabled) && d.state === "ready" && d.index && ![...this.running.values()].some((r) => r.serial === d.serial))
       .map((d) => ({ serial: d.serial, index: d.index! }))
     if (free.length === 0) return
     const queues = [...this.queues.values()].filter((q) => q.appId === this.activeAppId)
@@ -699,6 +733,10 @@ export class Runner {
     if (!ERROR_DIALOG_RE.test(after)) {
       this.log(`diálogo de erro fechado em ${serial}: "${focus}"`)
       return true
+    }
+    if (this.physical.has(serial)) {
+      this.log(`diálogo de erro não fecha no aparelho físico ${serial}: "${after}" — caso fica na fila`)
+      return false
     }
     this.log(`diálogo de erro não fecha em ${serial}: "${after}" → manutenção`)
     this.restartDevice(index, `diálogo de erro na tela: ${after}`)
@@ -767,6 +805,7 @@ export class Runner {
       timedOut: false,
       canceled: false,
       deviceLost: false,
+      physical: this.physical.has(a.serial),
       timers: [],
     }
     this.running.set(`${q.id}/${it.id}`, ra)
