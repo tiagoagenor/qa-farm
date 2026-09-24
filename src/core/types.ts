@@ -79,6 +79,7 @@ export const AttemptSchema = z.object({
   teardownMessage: z.string().optional(),
   dir: z.string(), // relativo a runs/
   pgid: z.number().int().optional(),
+  screenshots: z.array(z.string()).optional(),
 })
 export type Attempt = z.infer<typeof AttemptSchema>
 

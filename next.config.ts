@@ -1,7 +1,11 @@
-import type { NextConfig } from "next";
+import path from "node:path"
+
+import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
-  /* config options here */
-};
+  // o repositório é a raiz (evita o Next "adivinhar" outra pasta com package-lock)
+  outputFileTracingRoot: path.resolve(__dirname),
+  poweredByHeader: false,
+}
 
-export default nextConfig;
+export default nextConfig

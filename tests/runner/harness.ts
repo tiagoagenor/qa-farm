@@ -33,7 +33,7 @@ export async function makeHarness(opts: { emulators?: number; physical?: string[
     QAFARM_FAKE_SCENARIO: scenario,
     QAFARM_DATA_DIR: dataDir,
     QAFARM_REPO_ROOT: REPO,
-  } as NodeJS.ProcessEnv)
+  } as unknown as NodeJS.ProcessEnv)
   const p = dataPaths(dataDir)
   // app já enviado
   await fs.mkdir(p.app(APP_ID), { recursive: true })
@@ -69,7 +69,7 @@ export async function makeHarness(opts: { emulators?: number; physical?: string[
   async function command(c: Command): Promise<CommandResult> {
     const id = newId("cmd")
     await writeJsonAtomic(p.command(id), { id, createdAt: new Date().toISOString(), command: c })
-    return tickUntil(() => readJson(p.commandDone(id), CommandResultSchema.nullable(), null))
+    return tickUntil(async () => (await readJson(p.commandDone(id), CommandResultSchema.nullable(), null)) ?? undefined)
   }
 
   async function queueFile(id: string): Promise<Queue | null> {

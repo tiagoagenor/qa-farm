@@ -122,16 +122,16 @@ describe("applyResult", () => {
     ])
   })
 
-  it("guarda a mensagem de erro e a de teardown na tentativa", () => {
+  it("guarda a mensagem de erro, a de teardown e os prints na tentativa", () => {
     // Arrange
     const q = queue([item("A", [], { status: "running", attempts: [attempt({ n: 1 })] })])
-    const res = { status: "failed" as const, message: "boom", teardownMessage: "td", screenshots: [], hasOutputXml: true }
+    const res = { status: "failed" as const, message: "boom", teardownMessage: "td", screenshots: ["f.png"], hasOutputXml: true }
 
     // Act
     const out = applyResult(q, "A", 1, res, NOW)
 
     // Assert
-    expect(out.items[0].attempts[0]).toMatchObject({ status: "failed", message: "boom", teardownMessage: "td" })
+    expect(out.items[0].attempts[0]).toMatchObject({ status: "failed", message: "boom", teardownMessage: "td", screenshots: ["f.png"] })
   })
 
   it("item de fila cancelada termina como cancelado", () => {

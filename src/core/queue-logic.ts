@@ -113,6 +113,7 @@ export function applyResult(queue: Queue, itemIdValue: string, n: number, res: R
             endedAt: endedAt.toISOString(),
             message: res.message,
             teardownMessage: res.teardownMessage,
+            screenshots: res.screenshots,
             pgid: undefined,
           }
         : a,

@@ -7,7 +7,7 @@ import path from "node:path"
 
 const ROOTS = ["tests", "e2e"]
 const FILE_RE = /\.(test|spec)\.tsx?$/
-const DECL_RE = /^[ \t]*(?:it|test)(?:\.each\([\s\S]*?\))?\(\s*(["'`])(.*?)\1/gm
+const DECL_RE = /^[ \t]*(?:it|test)(?:\.(?:each|skipIf|runIf)\([\s\S]*?\))?\(\s*(["'`])(.*?)\1/gm
 
 function walk(dir) {
   if (!fs.existsSync(dir)) return []

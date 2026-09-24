@@ -73,6 +73,7 @@ export class Runner {
   private catalogStatus: RunnerState["catalogStatus"] = "missing"
   private catalogError?: string
   private snapshot: Snapshot | null = null
+  private catalogBuild: Promise<void> | null = null
   private activeAppId?: string
   private appMetaCache = new Map<string, AppMeta | null>()
   private ticking = false
@@ -201,8 +202,15 @@ export class Runner {
   }
 
   // ------------------------------------------------------------- catálogo ---
-  private async refreshCatalog(force: boolean): Promise<void> {
-    if (this.catalogStatus === "building") return
+  private refreshCatalog(force: boolean): Promise<void> {
+    if (this.catalogBuild) return this.catalogBuild
+    this.catalogBuild = this.buildCatalog(force).finally(() => {
+      this.catalogBuild = null
+    })
+    return this.catalogBuild
+  }
+
+  private async buildCatalog(force: boolean): Promise<void> {
     this.catalogStatus = "building"
     try {
       this.snapshot = await this.ad.snapshots.ensure()
@@ -259,6 +267,7 @@ export class Runner {
           (q) => (q.status === "running" || q.status === "paused") && q.appId !== c.input.appId && q.items.some((i) => i.status === "queued" || i.status === "running"),
         )
         if (other) return { ok: false, message: `A fila "${other.name}" usa outro app. Um app por vez: aguarde, cancele ou use o mesmo app.` }
+        if (!this.catalog && this.catalogBuild) await this.catalogBuild // 1ª geração ainda em andamento
         if (!this.catalog) return { ok: false, message: "Catálogo ainda não está pronto" }
         const snap = this.snapshot ?? (this.snapshot = await this.ad.snapshots.ensure())
         const byId = new Map(this.catalog.entries.map((e) => [e.id, e]))
@@ -394,7 +403,7 @@ export class Runner {
         updatedAt: now,
       }
       if (d.kind === "physical") {
-        next.set(d.serial, { ...base, state: "external", note: "Aparelho externo: não recebe casos" })
+        next.set(d.serial, { ...base, state: "external" })
         continue
       }
       const idx = d.index!
