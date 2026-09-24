@@ -107,6 +107,24 @@ describe("runner (modo fake)", () => {
     ])
   })
 
+  it("muitos casos curtos terminando e começando juntos: nenhum resultado se perde", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 8, ioDelayMs: 40 })
+    const pass = await h.catalogIds((n) => n.includes("PASS") && !n.includes("SLOW"))
+    const ids = pass.slice(0, 30)
+
+    // Act
+    const created = await h.command({ type: "create_queue", input: queueInput(ids) })
+    const q = await h.tickUntil(() => {
+      const live = liveQueue(created.data!.queueId as string)
+      return finished(live) ? live : undefined
+    }, 90_000)
+
+    // Assert
+    const onDisk = await h.queueFile(q.id)
+    expect([q.status, onDisk?.items.every((i) => i.status === "passed" && i.attempts.length === 1)]).toEqual(["done", true])
+  })
+
   it("aparelho físico aparece como externo e nunca recebe caso", async () => {
     // Arrange
     h = await makeHarness({ emulators: 0, physical: ["FAKE-PHYSICAL-01"] })
@@ -401,6 +419,32 @@ describe("runner (modo fake)", () => {
         /* ok */
       }
     }
+  })
+
+  it("ao reiniciar, tentativa que já tinha terminado (result.json) aplica o resultado em vez de repetir", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+    const created = await h.command({ type: "create_queue", input: queueInput(ids) })
+    const qid = created.data!.queueId as string
+    const done = await h.tickUntil(() => {
+      const live = liveQueue(qid)
+      return finished(live) ? live : undefined
+    })
+    await h.runner.shutdown()
+    const stuck = { ...done, status: "running" as const, finishedAt: undefined, items: done.items.map((i) => ({ ...i, status: "running" as const, attempts: i.attempts.map((a) => ({ ...a, status: "running" as const })) })) }
+    await writeJsonAtomic(h.p.queue(qid), stuck)
+    const { Runner } = await import("@/runner/runner")
+    const { createAdapters } = await import("@/server/adapters")
+
+    // Act
+    const second = new Runner(h.cfg, createAdapters(h.cfg), () => {})
+    await second.init()
+
+    // Assert
+    const q = second.snapshotForTests().queues.find((x) => x.id === qid)!
+    expect([q.status, q.items[0].status, q.items[0].attempts.length]).toEqual(["done", "passed", 1])
+    await second.shutdown()
   })
 
   it("grava o estado dos celulares e o heartbeat do runner", async () => {

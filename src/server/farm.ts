@@ -104,6 +104,7 @@ export function fakeFarm(cfg: Config): Farm {
       return { ok: true, code: 0 }
     },
     async qemuPids() {
+      if (cfg.fakeIoDelayMs) await sleep(cfg.fakeIoDelayMs) // simula a leitura lenta dos pidfiles do servidor real
       const w = await readWorld(dir)
       const out = new Map<number, number>()
       for (const d of w.devices) {

@@ -7,6 +7,7 @@ export interface Config {
   fake: boolean
   fakeScenario?: string
   fakeSpeed: number
+  fakeIoDelayMs: number
   password: string
   secret: string
   robotProject: string
@@ -42,6 +43,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     fake: env.QAFARM_FAKE === "1",
     fakeScenario: env.QAFARM_FAKE_SCENARIO,
     fakeSpeed: num(env.QAFARM_FAKE_SPEED, 1),
+    fakeIoDelayMs: num(env.QAFARM_FAKE_IO_DELAY_MS, 0),
     password: env.QAFARM_PASSWORD ?? "",
     secret: env.QAFARM_SECRET ?? "",
     robotProject,

@@ -14,7 +14,7 @@ import { updateWorld } from "@/server/fake-world"
 export const REPO = path.resolve(__dirname, "../..")
 export const APP_ID = "app_20260924-100000_abcdef"
 
-export async function makeHarness(opts: { emulators?: number; physical?: string[] } = {}) {
+export async function makeHarness(opts: { emulators?: number; physical?: string[]; ioDelayMs?: number } = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "qafarm-runner-"))
   const scenario = path.join(dataDir, "scenario.json")
   await fs.writeFile(
@@ -33,6 +33,7 @@ export async function makeHarness(opts: { emulators?: number; physical?: string[
     QAFARM_FAKE_SCENARIO: scenario,
     QAFARM_DATA_DIR: dataDir,
     QAFARM_REPO_ROOT: REPO,
+    QAFARM_FAKE_IO_DELAY_MS: String(opts.ioDelayMs ?? 0),
   } as unknown as NodeJS.ProcessEnv)
   const p = dataPaths(dataDir)
   // app já enviado

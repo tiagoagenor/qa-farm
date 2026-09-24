@@ -26,6 +26,7 @@ import {
   QueueSchema,
   type RunnerState,
   RunnerStateSchema,
+  RunResultSchema,
 } from "@/core/types"
 import type { Adapters } from "@/server/adapters"
 import { killGroup } from "@/server/exec"
@@ -105,22 +106,38 @@ export class Runner {
     // 3) filas: o que estava rodando volta para a fila
     const now = new Date().toISOString()
     for (const file of await listJsonFiles(this.p.queues)) {
-      const q = await readJson(file, QueueSchema.nullable(), null)
+      let q = await readJson(file, QueueSchema.nullable(), null)
       if (!q) continue
-      let changed = false
-      const items = q.items.map((it) => {
-        if (it.status !== "running") return it
-        changed = true
-        const attempts = it.attempts.map((a) =>
-          a.status === "running"
-            ? { ...a, status: "infra_error" as const, endedAt: now, message: "Runner reiniciado durante o caso", pgid: undefined }
-            : a,
-        )
-        return { ...it, status: q.status === "canceled" ? ("canceled" as const) : ("queued" as const), attempts }
-      })
-      const fixed = finalizeIfDone({ ...q, items }, new Date())
-      this.queues.set(q.id, fixed)
-      if (changed || fixed !== q) this.persistQueue(q.id)
+      const original = q
+      for (const it of q.items) {
+        if (it.status !== "running") continue
+        const a = it.attempts.at(-1)
+        // a tentativa terminou (result.json gravado) mas a fila não foi atualizada: aplica o resultado
+        const res = a ? await readJson(path.join(this.p.runs, a.dir, "result.json"), RunResultSchema.nullable(), null) : null
+        if (a && res) {
+          q = applyResult(q, it.id, a.n, res, new Date())
+          continue
+        }
+        q = {
+          ...q,
+          items: q.items.map((x) =>
+            x.id !== it.id
+              ? x
+              : {
+                  ...x,
+                  status: q!.status === "canceled" ? ("canceled" as const) : ("queued" as const),
+                  attempts: x.attempts.map((t) =>
+                    t.status === "running"
+                      ? { ...t, status: "infra_error" as const, endedAt: now, message: "Runner reiniciado durante o caso", pgid: undefined }
+                      : t,
+                  ),
+                },
+          ),
+        }
+      }
+      const fixed = finalizeIfDone(q, new Date())
+      this.queues.set(fixed.id, fixed)
+      if (fixed !== original) this.persistQueue(fixed.id)
     }
     this.desired = (await readJson(this.p.desired, DesiredSchema, { devices: 0 })).devices
     this.catalog = await readJson(this.p.catalog, CatalogSchema.nullable(), null)
@@ -142,6 +159,7 @@ export class Runner {
       }
       this.reconcileFarm()
       this.processFarmOps()
+      await this.reconcileOrphans()
       await this.dispatch()
       await this.writeRunnerState()
     } catch (e) {
@@ -171,6 +189,19 @@ export class Runner {
   private setQueue(q: Queue): void {
     this.queues.set(q.id, q)
     this.persistQueue(q.id)
+  }
+
+  /**
+   * Atualiza a fila a partir do estado ATUAL em memória (síncrono, sem await entre ler e gravar).
+   * Nunca gravar uma cópia lida antes de um await: outra tentativa pode ter terminado no meio
+   * e o resultado dela se perderia (bug real visto com 15 celulares).
+   */
+  private updateQueue(id: string, fn: (current: Queue) => Queue): Queue | undefined {
+    const cur = this.queues.get(id)
+    if (!cur) return undefined
+    const next = fn(cur)
+    this.setQueue(next)
+    return next
   }
 
   private async writeRunnerState(): Promise<void> {
@@ -307,14 +338,14 @@ export class Runner {
         const q = this.queues.get(c.queueId)
         if (!q) return { ok: false, message: "Fila não encontrada" }
         if (q.status === "done" || q.status === "canceled") return { ok: false, message: "Fila já terminou" }
-        this.setQueue({ ...q, status: c.type === "pause_queue" ? "paused" : "running" })
+        this.updateQueue(q.id, (cur) => ({ ...cur, status: c.type === "pause_queue" ? "paused" : "running" }))
         return { ok: true, message: c.type === "pause_queue" ? "Fila pausada" : "Fila retomada" }
       }
       case "cancel_queue": {
         const q = this.queues.get(c.queueId)
         if (!q) return { ok: false, message: "Fila não encontrada" }
         if (q.status === "done" || q.status === "canceled") return { ok: false, message: "Fila já terminou" }
-        this.setQueue(cancelQueue(q, new Date()))
+        this.updateQueue(q.id, (cur) => cancelQueue(cur, new Date()))
         let killed = 0
         for (const ra of this.running.values()) {
           if (ra.queueId !== q.id) continue
@@ -563,6 +594,25 @@ export class Runner {
   }
 
   // -------------------------------------------------------------- execução ---
+  /**
+   * Rede de segurança: item "rodando" sem processo acompanhado pelo runner. Se a tentativa deixou
+   * result.json, aplica o resultado; senão volta para a fila como erro de infraestrutura.
+   */
+  private async reconcileOrphans(): Promise<void> {
+    for (const q of this.queues.values()) {
+      for (const it of q.items) {
+        if (it.status !== "running" || this.running.has(`${q.id}/${it.id}`)) continue
+        const a = it.attempts.at(-1)
+        if (!a) continue
+        const res = await readJson(path.join(this.p.runs, a.dir, "result.json"), RunResultSchema.nullable(), null)
+        if (this.running.has(`${q.id}/${it.id}`)) continue // começou de novo enquanto líamos
+        const result = res ?? { status: "infra_error" as const, message: "Tentativa perdida pelo runner", screenshots: [], hasOutputXml: false }
+        this.log(`reconciliado ${q.id}/${it.id}: ${result.status}${res ? " (result.json)" : " (sem result.json)"}`)
+        this.updateQueue(q.id, (cur) => applyResult(cur, it.id, a.n, result, new Date()))
+      }
+    }
+  }
+
   private async dispatch(): Promise<void> {
     await this.pickActiveApp()
     const free = [...this.devices.values()]
@@ -661,14 +711,14 @@ export class Runner {
       timers: [],
     }
     this.running.set(`${q.id}/${it.id}`, ra)
-    this.setQueue({
-      ...q,
-      items: q.items.map((i) =>
+    this.updateQueue(q.id, (cur) => ({
+      ...cur,
+      items: cur.items.map((i) =>
         i.id === it.id
           ? { ...i, status: "running", attempts: [...i.attempts, { n, serial: a.serial, startedAt, status: "running", dir: relDir, pgid: spawned.pid }] }
           : i,
       ),
-    })
+    }))
     this.devices.set(a.serial, { ...this.devices.get(a.serial)!, state: "busy", currentQueueId: q.id, currentItemId: it.id, currentTestName: it.name })
     ra.timers.push(
       setTimeout(() => {
@@ -707,8 +757,7 @@ export class Runner {
     const removed = await this.ad.appium.cleanupSessions(ra.index, ra.serial)
     if (removed) this.log(`${removed} sessão(ões) do Appium encerrada(s) para ${ra.serial}`)
     this.running.delete(`${ra.queueId}/${ra.itemId}`)
-    const q = this.queues.get(ra.queueId)
-    if (q) this.setQueue(applyResult(q, ra.itemId, ra.n, result, new Date()))
+    this.updateQueue(ra.queueId, (cur) => applyResult(cur, ra.itemId, ra.n, result, new Date()))
     this.log(`■ ${ra.queueId}/${ra.itemId} em ${ra.serial}: ${result.status}${result.message ? ` — ${result.message.split("\n")[0].slice(0, 160)}` : ""}`)
     const d = this.devices.get(ra.serial)
     if (d && d.state === "busy") this.devices.set(ra.serial, { ...d, state: "ready", currentItemId: undefined, currentQueueId: undefined, currentTestName: undefined })
