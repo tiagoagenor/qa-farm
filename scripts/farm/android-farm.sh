@@ -33,6 +33,9 @@ OVERHEAD_MB="${OVERHEAD_MB:-1200}"  # RAM extra que o processo do emulador usa n
 SWAP_MB="${SWAP_MB:-0}"             # swap em disco dentro de cada celular (/data/swapfile); 0 = sem swap (padrão)
 CORES="${CORES:-2}"                 # vCPUs por celular
 DATA_SIZE="${DATA_SIZE:-4G}"        # armazenamento interno
+LCD_WIDTH="${LCD_WIDTH:-1080}"      # tela (padrão = Pixel 6: 1080x2400 @ 420 dpi)
+LCD_HEIGHT="${LCD_HEIGHT:-2400}"    #   para voltar à tela antiga: LCD_WIDTH=720 LCD_HEIGHT=1280 LCD_DENSITY=320
+LCD_DENSITY="${LCD_DENSITY:-420}"
 PREFIX="${PREFIX:-farm}"            # nome dos AVDs: farm-01, farm-02 ...
 BASE_PORT=5554                      # celular i usa console 5554+2(i-1), adb +1
 EXPOSE_BASE="${EXPOSE_BASE:-7000}"  # porta externa (LAN) do celular i = 7000+i
@@ -83,6 +86,7 @@ Opções:
   -m, --ram MB          Memória por celular (padrão: $RAM_MB)
   -s, --swap MB         Swap em disco por celular (padrão: $SWAP_MB = sem swap)
   -c, --cores N         vCPUs por celular (padrão: $CORES)
+                        Tela: LCD_WIDTH x LCD_HEIGHT @ LCD_DENSITY dpi (padrão: ${LCD_WIDTH}x${LCD_HEIGHT} @ $LCD_DENSITY)
   -a, --api N           Nível da API Android (padrão: $API)
       --variant V       google_apis | default | google_apis_playstore (padrão: $VARIANT)
       --cold            Boot a frio (ignora snapshot quickboot)
@@ -91,7 +95,7 @@ Opções:
       --gui             Abre janela (precisa de display; padrão é headless)
       --no-tune         Não aplica ajustes de teste (animações off, tela sempre ligada)
 
-Variáveis de ambiente: FARM_HOME, ANDROID_SDK_ROOT, BOOT_TIMEOUT, STAGGER, PREFIX
+Variáveis de ambiente: FARM_HOME, ANDROID_SDK_ROOT, BOOT_TIMEOUT, STAGGER, PREFIX, LCD_WIDTH, LCD_HEIGHT, LCD_DENSITY
 EOF
 }
 
@@ -169,6 +173,11 @@ create_avd() {  # $1 = índice
     echo "no" | "$AVDM" create avd -n "$name" -k "$(image_pkg)" -d pixel_6 --force >/dev/null 2>&1 \
       || die "Falha ao criar AVD $name"
   fi
+  # tela mudou → o snapshot de boot rápido não serve mais (boot a frio uma vez)
+  local cur; cur=$(grep -E "^hw.lcd.(width|height|density) *=" "$cfg" | sed 's/ //g' | sort | tr '\n' ' ')
+  if [ -n "$cur" ] && [ "$cur" != "hw.lcd.density=$LCD_DENSITY hw.lcd.height=$LCD_HEIGHT hw.lcd.width=$LCD_WIDTH " ]; then
+    rm -rf "$ANDROID_AVD_HOME/$name.avd/snapshots/default_boot"
+  fi
   # garante as configurações (inclusive se mudar -m/-c depois)
   local k v
   while IFS='=' read -r k v; do
@@ -185,9 +194,9 @@ hw.audioOutput=no
 hw.camera.back=none
 hw.camera.front=none
 hw.keyboard=yes
-hw.lcd.width=720
-hw.lcd.height=1280
-hw.lcd.density=320
+hw.lcd.width=$LCD_WIDTH
+hw.lcd.height=$LCD_HEIGHT
+hw.lcd.density=$LCD_DENSITY
 fastboot.forceColdBoot=no
 EOF
 }
