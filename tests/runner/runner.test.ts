@@ -421,7 +421,7 @@ describe("runner (modo fake)", () => {
     }
   })
 
-  it("ao reiniciar, tentativa que já tinha terminado (result.json) aplica o resultado em vez de repetir", async () => {
+  it("ao reiniciar, tentativa que já tinha terminado aplica o resultado com o horário real de término", async () => {
     // Arrange
     h = await makeHarness({ emulators: 1 })
     const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
@@ -443,7 +443,12 @@ describe("runner (modo fake)", () => {
 
     // Assert
     const q = second.snapshotForTests().queues.find((x) => x.id === qid)!
-    expect([q.status, q.items[0].status, q.items[0].attempts.length]).toEqual(["done", "passed", 1])
+    expect([q.status, q.items[0].status, q.items[0].attempts.length, q.items[0].attempts[0].endedAt]).toEqual([
+      "done",
+      "passed",
+      1,
+      done.items[0].attempts[0].endedAt, // término real, não a hora do reinício
+    ])
     await second.shutdown()
   })
 

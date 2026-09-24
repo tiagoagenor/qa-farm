@@ -115,7 +115,7 @@ export class Runner {
         // a tentativa terminou (result.json gravado) mas a fila não foi atualizada: aplica o resultado
         const res = a ? await readJson(path.join(this.p.runs, a.dir, "result.json"), RunResultSchema.nullable(), null) : null
         if (a && res) {
-          q = applyResult(q, it.id, a.n, res, new Date())
+          q = applyResult(q, it.id, a.n, res, await this.resultTime(a.dir, res))
           continue
         }
         q = {
@@ -593,6 +593,13 @@ export class Runner {
       })
   }
 
+  /** Término real de uma tentativa recuperada: finishedAt do result.json, ou a data do arquivo. */
+  private async resultTime(dir: string, res: { finishedAt?: string }): Promise<Date> {
+    if (res.finishedAt) return new Date(res.finishedAt)
+    const st = await fsp.stat(path.join(this.p.runs, dir, "result.json")).catch(() => null)
+    return st ? st.mtime : new Date()
+  }
+
   // -------------------------------------------------------------- execução ---
   /**
    * Rede de segurança: item "rodando" sem processo acompanhado pelo runner. Se a tentativa deixou
@@ -608,7 +615,8 @@ export class Runner {
         if (this.running.has(`${q.id}/${it.id}`)) continue // começou de novo enquanto líamos
         const result = res ?? { status: "infra_error" as const, message: "Tentativa perdida pelo runner", screenshots: [], hasOutputXml: false }
         this.log(`reconciliado ${q.id}/${it.id}: ${result.status}${res ? " (result.json)" : " (sem result.json)"}`)
-        this.updateQueue(q.id, (cur) => applyResult(cur, it.id, a.n, result, new Date()))
+        const at = res ? await this.resultTime(a.dir, res) : new Date()
+        this.updateQueue(q.id, (cur) => applyResult(cur, it.id, a.n, result, at))
       }
     }
   }
@@ -752,12 +760,13 @@ export class Runner {
       consoleText: consoleFull.slice(-64 * 1024),
       screenshots: files.filter((f) => /\.(png|jpe?g)$/i.test(f)).sort(),
     })
-    await writeJsonAtomic(path.join(ra.dir, "result.json"), result)
+    const finishedAt = new Date()
+    await writeJsonAtomic(path.join(ra.dir, "result.json"), { ...result, finishedAt: finishedAt.toISOString() })
     // sessão órfã (timeout/cancelamento/robot morto) ocuparia as portas do celular no Appium compartilhado
     const removed = await this.ad.appium.cleanupSessions(ra.index, ra.serial)
     if (removed) this.log(`${removed} sessão(ões) do Appium encerrada(s) para ${ra.serial}`)
     this.running.delete(`${ra.queueId}/${ra.itemId}`)
-    this.updateQueue(ra.queueId, (cur) => applyResult(cur, ra.itemId, ra.n, result, new Date()))
+    this.updateQueue(ra.queueId, (cur) => applyResult(cur, ra.itemId, ra.n, result, finishedAt))
     this.log(`■ ${ra.queueId}/${ra.itemId} em ${ra.serial}: ${result.status}${result.message ? ` — ${result.message.split("\n")[0].slice(0, 160)}` : ""}`)
     const d = this.devices.get(ra.serial)
     if (d && d.state === "busy") this.devices.set(ra.serial, { ...d, state: "ready", currentItemId: undefined, currentQueueId: undefined, currentTestName: undefined })

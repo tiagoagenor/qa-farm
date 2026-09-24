@@ -230,5 +230,6 @@ export const RunResultSchema = z.object({
   exitCode: z.number().nullable().optional(),
   screenshots: z.array(z.string()),
   hasOutputXml: z.boolean(),
+  finishedAt: z.string().optional(), // término real da tentativa (usado ao recuperar após reinício)
 })
 export type RunResult = z.infer<typeof RunResultSchema>
