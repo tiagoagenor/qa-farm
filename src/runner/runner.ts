@@ -51,6 +51,8 @@ interface RunningAttempt {
 }
 
 const DEVICE_REFRESH_MS = 2000
+/** Janelas de erro do Android que bloqueiam a tela (ANR / app parou). */
+export const ERROR_DIALOG_RE = /Application Not Responding|Application Error|isn.t responding|has stopped|keeps stopping/i
 const DESIRED_RETRY_MS = 5 * 60_000
 
 export class Runner {
@@ -61,6 +63,7 @@ export class Runner {
   private devices = new Map<string, Device>()
   private appVersions = new Map<string, number | undefined>() // serial → versionCode instalado
   private installing = new Set<string>()
+  private prepared = new Set<string>() // celulares já configurados para testes (diálogos de erro desligados)
   private maintenance = new Map<number, { since: string; reason: string }>()
   private farmOps: FarmOp[] = []
   private farmBusy = false
@@ -381,6 +384,7 @@ export class Runner {
     this.maintenance.set(index, { since: new Date().toISOString(), reason })
     const serial = serialFromIndex(index)
     this.appVersions.delete(serial)
+    this.prepared.delete(serial)
     this.farmOps.push({ kind: "stopOne", index }, { kind: "startOne", index })
     this.log(`manutenção farm-${index} (${reason})`)
   }
@@ -470,6 +474,12 @@ export class Runner {
               next.set(d.serial, { ...base, state: "installing", appVersionCode: vc, note: `Instalando ${meta.versionName} (${meta.versionCode})` })
               return
             }
+          }
+          if (!this.prepared.has(d.serial)) {
+            // ANR do System UI no boot deixa um diálogo na tela que bloqueia todos os casos daquele celular
+            await this.ad.adb.putGlobalSetting(d.serial, "hide_error_dialogs", "1")
+            await this.ad.adb.closeSystemDialogs(d.serial)
+            this.prepared.add(d.serial)
           }
           next.set(d.serial, { ...base, state: "ready", appVersionCode: this.appVersions.get(d.serial) })
         })(),
@@ -566,8 +576,26 @@ export class Runner {
     })
     for (const a of schedule(queues, free, running)) {
       const dev = free.find((f) => f.serial === a.serial)!
+      if (!(await this.preflight(a.serial, dev.index))) continue // caso continua na fila para outro celular
       await this.startAttempt(a, dev.index)
     }
+  }
+
+  /** Antes de cada caso: fecha diálogo de erro na tela; se não fechar, o celular vai para manutenção. */
+  private async preflight(serial: string, index: number): Promise<boolean> {
+    const focus = await this.ad.adb.focusedWindow(serial)
+    if (!ERROR_DIALOG_RE.test(focus)) return true
+    await this.ad.adb.closeSystemDialogs(serial)
+    const after = await this.ad.adb.focusedWindow(serial)
+    if (!ERROR_DIALOG_RE.test(after)) {
+      this.log(`diálogo de erro fechado em ${serial}: "${focus}"`)
+      return true
+    }
+    this.log(`diálogo de erro não fecha em ${serial}: "${after}" → manutenção`)
+    this.restartDevice(index, `diálogo de erro na tela: ${after}`)
+    const d = this.devices.get(serial)
+    if (d) this.devices.set(serial, { ...d, state: "maintenance", note: after })
+    return false
   }
 
   private async startAttempt(a: Assignment, index: number): Promise<void> {

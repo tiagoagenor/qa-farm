@@ -14,6 +14,8 @@ const FakeDeviceSchema = z.object({
   bootAt: z.number(),
   pid: z.number().optional(),
   installed: z.record(z.string(), z.number()),
+  dialog: z.string().optional(), // janela de erro simulada (ex.: "Application Not Responding: com.android.systemui")
+  settings: z.record(z.string(), z.string()).optional(),
 })
 export type FakeDevice = z.infer<typeof FakeDeviceSchema>
 

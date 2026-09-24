@@ -9,6 +9,11 @@ export interface Adb {
   versionCode(serial: string, pkg: string): Promise<number | undefined>
   install(serial: string, apk: string, pkg: string, versionCode: number): Promise<{ ok: boolean; output: string }>
   screencap(serial: string): Promise<Buffer | null>
+  /** Janela com foco (ex.: "Application Not Responding: com.android.systemui"). */
+  focusedWindow(serial: string): Promise<string>
+  /** Fecha diálogos do sistema (inclusive ANR/"parou de responder"). */
+  closeSystemDialogs(serial: string): Promise<void>
+  putGlobalSetting(serial: string, key: string, value: string): Promise<void>
 }
 
 export function realAdb(cfg: Config): Adb {
@@ -34,6 +39,16 @@ export function realAdb(cfg: Config): Adb {
     },
     async screencap(serial) {
       return runBuffer(adb, ["-s", serial, "exec-out", "screencap", "-p"], 15_000)
+    },
+    async focusedWindow(serial) {
+      const r = await run(adb, ["-s", serial, "shell", "dumpsys", "window"], { timeoutMs: 15_000 })
+      return /mCurrentFocus=Window\{\S+ \S+ ([^}]*)\}/.exec(r.stdout)?.[1] ?? ""
+    },
+    async closeSystemDialogs(serial) {
+      await run(adb, ["-s", serial, "shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS"], { timeoutMs: 15_000 })
+    },
+    async putGlobalSetting(serial, key, value) {
+      await run(adb, ["-s", serial, "shell", "settings", "put", "global", key, value], { timeoutMs: 15_000 })
     },
   }
 }
@@ -67,6 +82,22 @@ export function fakeAdb(cfg: Config): Adb {
     async screencap(serial) {
       const d = (await readWorld(dir)).devices.find((x) => x.serial === serial)
       return d ? FAKE_PNG : null
+    },
+    async focusedWindow(serial) {
+      const d = (await readWorld(dir)).devices.find((x) => x.serial === serial)
+      return d?.dialog ?? "com.exemplo.App.hml/com.exemplo.versao3.MainActivity"
+    },
+    async closeSystemDialogs(serial) {
+      await updateWorld(dir, (w) => {
+        const d = w.devices.find((x) => x.serial === serial)
+        if (d && !d.dialog?.includes("PERSISTENTE")) d.dialog = undefined
+      })
+    },
+    async putGlobalSetting(serial, key, value) {
+      await updateWorld(dir, (w) => {
+        const d = w.devices.find((x) => x.serial === serial)
+        if (d) d.settings = { ...d.settings, [key]: value }
+      })
     },
   }
 }

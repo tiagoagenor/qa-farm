@@ -241,6 +241,7 @@ tune_device() {  # ajustes para testes automatizados
     settings put system screen_off_timeout 2147483647;
     settings put secure show_ime_with_hard_keyboard 0;
     settings put global package_verifier_enable 0;
+    settings put global hide_error_dialogs 1;
     input keyevent 82' >/dev/null 2>&1
 }
 

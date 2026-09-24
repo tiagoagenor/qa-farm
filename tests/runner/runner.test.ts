@@ -51,6 +51,62 @@ describe("runner (modo fake)", () => {
     ])
   })
 
+  it("celular pronto é configurado para não exibir diálogos de erro", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+
+    // Act
+    await h.tickUntil(async () => (await h.readyCount()) === 1 || undefined)
+
+    // Assert
+    const { readWorld } = await import("@/server/fake-world")
+    const w = await readWorld(h.dataDir)
+    expect(w.devices[0].settings).toEqual({ hide_error_dialogs: "1" })
+  })
+
+  it("diálogo de ANR na tela é fechado antes do caso e o caso roda normalmente", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    await h.tickUntil(async () => (await h.readyCount()) === 1 || undefined)
+    await h.world((w) => {
+      w.devices[0].dialog = "Application Not Responding: com.android.systemui"
+    })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+
+    // Act
+    const created = await h.command({ type: "create_queue", input: queueInput(ids) })
+    const q = await h.tickUntil(() => {
+      const live = liveQueue(created.data!.queueId as string)
+      return finished(live) ? live : undefined
+    })
+
+    // Assert
+    expect([q.items[0].status, h.logs.some((l) => l.startsWith("diálogo de erro fechado em emulator-5554"))]).toEqual(["passed", true])
+  })
+
+  it("diálogo de erro que não fecha manda o celular para manutenção e o caso roda em outro", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 2 })
+    await h.tickUntil(async () => (await h.readyCount()) === 2 || undefined)
+    await h.world((w) => {
+      w.devices[0].dialog = "Application Not Responding: com.android.systemui PERSISTENTE"
+    })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+
+    // Act
+    const created = await h.command({ type: "create_queue", input: queueInput(ids) })
+    const q = await h.tickUntil(() => {
+      const live = liveQueue(created.data!.queueId as string)
+      return finished(live) ? live : undefined
+    })
+
+    // Assert
+    expect([q.items[0].attempts.map((a) => a.serial), h.logs.some((l) => l.includes("emulator-5554") && l.includes("→ manutenção"))]).toEqual([
+      ["emulator-5556"],
+      true,
+    ])
+  })
+
   it("aparelho físico aparece como externo e nunca recebe caso", async () => {
     // Arrange
     h = await makeHarness({ emulators: 0, physical: ["FAKE-PHYSICAL-01"] })
