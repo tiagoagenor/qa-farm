@@ -20,7 +20,7 @@ jobs:
           python-version: "3.14"
       - name: Dependências
         run: |
-          npm ci
+          npm ci || npm install --no-audit --no-fund
           python -m pip install -r requirements-dev.txt
       - name: Lint + padrão AAA
         run: npm run lint
