@@ -518,6 +518,15 @@ export class Runner {
     }
     await Promise.all(readyChecks)
 
+    // emulador que estava na fazenda e sumiu do adb (qemu morreu) → reinicia já, sem esperar a reconciliação
+    const stopping = this.farmOps.some((o) => o.kind === "stopAll") || this.farmJob?.command === "desligar todos"
+    for (const prev of this.devices.values()) {
+      const idx = prev.index
+      if (prev.kind !== "emulator" || !idx || next.has(prev.serial) || this.maintenance.has(idx)) continue
+      if (stopping || idx > this.desired || prev.state === "maintenance") continue
+      this.restartDevice(idx, "sumiu do adb")
+    }
+
     // emuladores em manutenção que nem aparecem no adb continuam visíveis
     for (const [idx, m] of this.maintenance) {
       const serial = serialFromIndex(idx)

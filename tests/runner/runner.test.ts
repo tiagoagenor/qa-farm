@@ -379,6 +379,23 @@ describe("runner (modo fake)", () => {
     expect(h.runner.snapshotForTests().maintenance).toEqual([])
   })
 
+  it("emulador que some do adb (sem caso rodando) é reiniciado sem esperar", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 0 })
+    await h.command({ type: "start_devices", count: 2 })
+    await h.tickUntil(async () => (await h.readyCount()) === 2 || undefined, 30_000)
+
+    // Act
+    await h.world((w) => {
+      w.devices = w.devices.filter((d) => d.serial !== "emulator-5556")
+    })
+    await h.tickUntil(() => h.logs.some((l) => l.includes("manutenção farm-2 (sumiu do adb)")) || undefined)
+    await h.tickUntil(async () => (await h.readyCount()) === 2 || undefined, 30_000)
+
+    // Assert
+    expect(h.runner.snapshotForTests().maintenance).toEqual([])
+  })
+
   it("um app por vez: fila com outro app é recusada enquanto há fila ativa", async () => {
     // Arrange
     h = await makeHarness({ emulators: 0 })

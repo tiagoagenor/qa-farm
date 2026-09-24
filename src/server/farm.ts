@@ -31,10 +31,11 @@ export function describeOp(op: FarmOp): string {
   }
 }
 
-export function realFarm(cfg: Config): Farm {
+export function realFarm(cfg: Config, timeoutMs = 20 * 60_000): Farm {
   const script = path.join(cfg.repoRoot, "scripts/farm/android-farm.sh")
   const down = path.join(cfg.repoRoot, "scripts/farm/android-farm-down.sh")
-  const lock = path.join(cfg.farmHome, "run", "farm.lock")
+  // farm-ops.lock (não farm.lock): emuladores antigos, iniciados antes do "flock -o", ainda seguram o lock antigo
+  const lock = path.join(cfg.farmHome, "run", "farm-ops.lock")
   return {
     async exec(op, logFile) {
       await fsp.mkdir(path.dirname(lock), { recursive: true })
@@ -49,16 +50,33 @@ export function realFarm(cfg: Config): Farm {
               : [down]
       const out = fs.openSync(logFile, "a")
       fs.writeSync(out, `\n=== ${new Date().toISOString()} ${describeOp(op)}\n`)
-      // detached: grupo de processos próprio — reiniciar o runner (kill no grupo dele) não derruba os emuladores
-      const child = spawn("flock", [lock, "bash", ...args], {
+      // detached: grupo de processos próprio — reiniciar o runner (kill no grupo dele) não derruba os emuladores.
+      // flock -o: o lock não é herdado pelo script — senão os emuladores (que vivem horas) seguram o lock
+      // para sempre e toda operação seguinte da fazenda fica bloqueada (bug real).
+      const child = spawn("flock", ["-o", lock, "bash", ...args], {
         stdio: ["ignore", out, out],
         env: { ...process.env, FARM_HOME: cfg.farmHome, ANDROID_SDK_ROOT: cfg.sdkRoot },
         detached: true,
       })
       fs.closeSync(out)
       return new Promise((resolve) => {
-        child.on("exit", (code) => resolve({ ok: code === 0, code }))
-        child.on("error", () => resolve({ ok: false, code: null }))
+        // nenhuma operação pode travar a fazenda para sempre
+        const timer = setTimeout(() => {
+          fs.appendFileSync(logFile, `=== tempo máximo (${Math.round(timeoutMs / 60000)} min) excedido: ${describeOp(op)} interrompida\n`)
+          try {
+            process.kill(-(child.pid ?? 0), "SIGKILL")
+          } catch {
+            /* já terminou */
+          }
+        }, timeoutMs)
+        child.on("exit", (code) => {
+          clearTimeout(timer)
+          resolve({ ok: code === 0, code })
+        })
+        child.on("error", () => {
+          clearTimeout(timer)
+          resolve({ ok: false, code: null })
+        })
       })
     },
     async qemuPids() {
