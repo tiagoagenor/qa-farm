@@ -52,6 +52,37 @@ describe("runner (modo fake)", () => {
     ])
   })
 
+  it("quando a fila termina, os celulares ficam na versão dela mesmo com um APK mais antigo enviado depois", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+    const qid = (await h.command({ type: "create_queue", input: queueInput(ids) })).data!.queueId as string
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+    const OLD = "app_20260925-100000_aaaaaa"
+    await fs.mkdir(h.p.app(OLD), { recursive: true })
+    await fs.writeFile(h.p.appApk(OLD), "PK-old")
+    await writeJsonAtomic(h.p.appMeta(OLD), {
+      id: OLD,
+      originalName: "antigo.apk",
+      package: "com.exemplo.App.hml",
+      versionName: "7.25.2",
+      versionCode: 5498,
+      minSdk: 26,
+      abis: ["x86_64"],
+      launchableActivity: "com.exemplo.MainActivity",
+      md5: "y",
+      size: 6,
+      uploadedAt: "2026-09-25T10:00:00.000Z",
+    })
+
+    // Act
+    for (let i = 0; i < 8; i++) await h.runner.tick()
+
+    // Assert
+    const d = h.runner.snapshotForTests().devices[0]
+    expect([d.state, d.appVersionCode]).toEqual(["ready", 5528])
+  })
+
   it("celular pronto é configurado para não exibir diálogos de erro", async () => {
     // Arrange
     h = await makeHarness({ emulators: 1 })

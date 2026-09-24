@@ -241,8 +241,9 @@ export class Runner {
   }
 
   /**
-   * App ativo (um app por vez nos celulares): o da fila ativa mais antiga; sem fila ativa, o APK enviado
-   * mais recentemente — assim ele já fica pré-instalado e a próxima fila começa sem esperar a instalação.
+   * App ativo (um app por vez nos celulares): o da fila ativa mais antiga; sem fila ativa, o da fila mais
+   * recente (os celulares não trocam de versão quando a fila acaba); sem nenhuma fila, o APK enviado por último
+   * (fica pré-instalado e a primeira fila começa sem esperar a instalação).
    */
   private async pickActiveApp(): Promise<void> {
     const active = [...this.queues.values()]
@@ -250,6 +251,14 @@ export class Runner {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]
     if (active) {
       this.activeAppId = active.appId
+      return
+    }
+    // sem fila ativa: mantém a versão da fila mais recente (mesmo terminada) — não troca o app dos celulares
+    // quando a fila acaba (voltar para um APK mais antigo obriga desinstalar no aparelho físico).
+    // Nunca houve fila: pré-instala o APK enviado por último.
+    const latest = [...this.queues.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+    if (latest && (await this.appMeta(latest.appId))) {
+      this.activeAppId = latest.appId
       return
     }
     const newest = await this.newestAppId()
