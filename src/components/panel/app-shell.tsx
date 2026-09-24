@@ -133,7 +133,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset>
+      <SidebarInset className="min-w-0">
         <header className="bg-background/95 sticky top-0 z-10 flex h-12 items-center gap-2 border-b px-4 backdrop-blur">
           <SidebarTrigger />
           <div className="text-muted-foreground ml-auto flex items-center gap-3 text-xs">
@@ -144,7 +144,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
+        <main className="mx-auto w-full max-w-[1400px] min-w-0 p-4 md:p-6">
           <RunnerBanner o={overview} />
           {children}
         </main>

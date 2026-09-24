@@ -6,6 +6,7 @@ import {
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  Columns3,
   ExternalLink,
   FileCode2,
   Folder,
@@ -19,7 +20,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useMemo, useState } from "react"
+import { Fragment, useMemo, useState } from "react"
 
 import type { Item, ItemStatus } from "@/core/types"
 import { EmptyState, PageHeader } from "@/components/panel/page-header"
@@ -35,13 +36,24 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { ResizableHead } from "@/components/panel/resizable-head"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useLiveNow } from "@/hooks/use-live-now"
+import { useColumnPrefs } from "@/hooks/use-column-prefs"
 import { usePoll } from "@/hooks/use-poll"
 import { sendCommand } from "@/lib/client"
 import {
@@ -55,6 +67,7 @@ import {
 import { massaLabel } from "@/core/massa"
 import { queueElapsedSec, RETRYABLE_ITEM_STATUSES } from "@/core/queue-logic"
 import { allGroupKeys, buildTreeRows, type TreeRow } from "@/lib/catalog-tree"
+import { type ColumnDef, visibleColumns } from "@/lib/table-columns"
 import { type GroupStats, groupStats, type QueueTreeEntry, queueTreeEntries } from "@/lib/queue-tree"
 
 import { ItemSheet } from "./item-sheet"
@@ -96,14 +109,31 @@ function Stat({
   )
 }
 
-const COLS = 11
+type ItemColumnKey =
+  "num" | "status" | "caso" | "celular" | "massa" | "duracao" | "tent" | "erro" | "print" | "logs" | "acoes"
+
+const ITEM_COLUMNS: ColumnDef<ItemColumnKey>[] = [
+  { key: "num", label: "#", width: 56 },
+  { key: "status", label: "Status", width: 150 },
+  { key: "caso", label: "Caso", width: 340, hideable: false },
+  { key: "celular", label: "Celular", width: 140 },
+  { key: "massa", label: "Massa", width: 230 },
+  { key: "duracao", label: "Duração", width: 100, align: "right" },
+  { key: "tent", label: "Tent.", width: 70, align: "center" },
+  { key: "erro", label: "Erro", width: 320 },
+  { key: "print", label: "Print", width: 70 },
+  { key: "logs", label: "Logs", width: 110 },
+  { key: "acoes", label: "", width: 52, hideable: false, resizable: false },
+]
 
 function GroupRow({
   row,
   open,
   stats,
+  colSpan,
   onToggle,
 }: {
+  colSpan: number
   row: Extract<TreeRow<QueueTreeEntry>, { kind: "folder" | "file" }>
   open: boolean
   stats: GroupStats
@@ -117,7 +147,7 @@ function GroupRow({
       data-testid={row.kind === "folder" ? "queue-folder" : "queue-file"}
       data-failed={stats.failed}
     >
-      <TableCell colSpan={COLS}>
+      <TableCell colSpan={colSpan}>
         <div className="flex items-center gap-2 text-sm" style={{ paddingLeft: row.depth * 20 }}>
           {open ? (
             <ChevronDown className="size-4 shrink-0 opacity-60" />
@@ -143,6 +173,7 @@ function ItemRow({
   it,
   now,
   busy,
+  cols,
   indent = 0,
   onOpen,
   onRetry,
@@ -150,6 +181,7 @@ function ItemRow({
   it: Item
   now: number
   busy: boolean
+  cols: ItemColumnKey[]
   indent?: number
   onOpen: (id: string) => void
   onRetry: (id: string) => void
@@ -157,18 +189,15 @@ function ItemRow({
   const a = it.attempts[it.attempts.length - 1]
   const shot = a?.screenshots?.[a.screenshots.length - 1]
   const label = massaLabel(a?.massa)
-  return (
-    <TableRow
-      className="cursor-pointer"
-      onClick={() => onOpen(it.id)}
-      data-testid="item-row"
-      data-status={it.status}
-    >
-      <TableCell className="text-muted-foreground tabular-nums">{Number(it.id.slice(1))}</TableCell>
+  const cells: Record<ItemColumnKey, React.ReactNode> = {
+    num: <TableCell className="text-muted-foreground tabular-nums">{Number(it.id.slice(1))}</TableCell>,
+    status: (
       <TableCell>
         <StatusBadge {...ITEM_STATUS[it.status]} />
       </TableCell>
-      <TableCell className="max-w-[340px]">
+    ),
+    caso: (
+      <TableCell>
         <p className="truncate font-medium" title={it.name} style={{ paddingLeft: indent }}>
           {it.name}
         </p>
@@ -176,8 +205,10 @@ function ItemRow({
           <p className="text-muted-foreground truncate text-xs">{it.file.replace(/^scenarios\//, "")}</p>
         )}
       </TableCell>
-      <TableCell className="font-mono text-xs">{a?.serial ?? "—"}</TableCell>
-      <TableCell className="max-w-[220px]" data-testid="item-massa">
+    ),
+    celular: <TableCell className="font-mono text-xs">{a?.serial ?? "—"}</TableCell>,
+    massa: (
+      <TableCell data-testid="item-massa">
         {label ? (
           <p className="truncate font-mono text-xs" title={label}>
             {label}
@@ -186,11 +217,15 @@ function ItemRow({
           <span className="text-muted-foreground truncate text-xs">{it.accounts.join(", ") || "—"}</span>
         )}
       </TableCell>
+    ),
+    duracao: (
       <TableCell className="text-right text-xs tabular-nums">
         {a ? formatDuration(durationBetween(a.startedAt, a.endedAt, now), !a.endedAt) : "—"}
       </TableCell>
-      <TableCell className="text-center tabular-nums">{it.attempts.length}</TableCell>
-      <TableCell className="max-w-[320px]">
+    ),
+    tent: <TableCell className="text-center tabular-nums">{it.attempts.length}</TableCell>,
+    erro: (
+      <TableCell>
         {a?.message && it.status !== "passed" ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -209,6 +244,8 @@ function ItemRow({
           <span className="text-muted-foreground text-xs">—</span>
         )}
       </TableCell>
+    ),
+    print: (
       <TableCell onClick={(e) => e.stopPropagation()}>
         {shot ? (
           <a href={runFileUrl(a.dir, shot)} target="_blank" rel="noreferrer">
@@ -224,6 +261,8 @@ function ItemRow({
           <span className="text-muted-foreground text-xs">—</span>
         )}
       </TableCell>
+    ),
+    logs: (
       <TableCell onClick={(e) => e.stopPropagation()}>
         {a && a.status !== "running" ? (
           <a
@@ -241,6 +280,8 @@ function ItemRow({
           <span className="text-muted-foreground text-xs">—</span>
         )}
       </TableCell>
+    ),
+    acoes: (
       <TableCell onClick={(e) => e.stopPropagation()}>
         {RETRYABLE_ITEM_STATUSES.has(it.status) && (
           <Tooltip>
@@ -261,6 +302,18 @@ function ItemRow({
           </Tooltip>
         )}
       </TableCell>
+    ),
+  }
+  return (
+    <TableRow
+      className="cursor-pointer"
+      onClick={() => onOpen(it.id)}
+      data-testid="item-row"
+      data-status={it.status}
+    >
+      {cols.map((k) => (
+        <Fragment key={k}>{cells[k]}</Fragment>
+      ))}
     </TableRow>
   )
 }
@@ -273,6 +326,10 @@ export function QueueDetail({ id }: { id: string }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [openItem, setOpenItem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const columns = useColumnPrefs("qafarm.queue-detail.columns", ITEM_COLUMNS)
+  const cols = visibleColumns(ITEM_COLUMNS, columns.prefs)
+  const colKeys = cols.map((c) => c.key)
+  const tableWidth = cols.reduce((sum, c) => sum + c.px, 0)
 
   const items = useMemo(() => data?.queue.items ?? [], [data])
   const counts = useMemo(() => {
@@ -325,6 +382,7 @@ export function QueueDetail({ id }: { id: string }) {
     busy,
     onOpen: setOpenItem,
     onRetry: (itemId: string) => run({ type: "retry_item", queueId: q.id, itemId }),
+    cols: colKeys,
   }
 
   return (
@@ -477,6 +535,32 @@ export function QueueDetail({ id }: { id: string }) {
               </Button>
             </>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" data-testid="columns-menu">
+                <Columns3 /> Colunas
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel>Colunas visíveis</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {ITEM_COLUMNS.filter((c) => c.hideable !== false).map((c) => (
+                <DropdownMenuCheckboxItem
+                  key={c.key}
+                  checked={!columns.prefs.hidden.includes(c.key)}
+                  onCheckedChange={() => columns.toggle(c.key)}
+                  onSelect={(e) => e.preventDefault()}
+                  data-testid={`column-toggle-${c.key}`}
+                >
+                  {c.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={columns.reset} data-testid="columns-reset">
+                <RotateCcw /> Restaurar padrão
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Tabs value={view} onValueChange={(v) => setView(v as "tree" | "list")}>
             <TabsList>
               <TabsTrigger value="tree" data-testid="view-tree">
@@ -494,20 +578,27 @@ export function QueueDetail({ id }: { id: string }) {
         <EmptyState title="Nenhum caso nesta aba" />
       ) : (
         <div className="rounded-md border">
-          <Table>
+          <Table
+            className="table-fixed [&_td]:overflow-hidden"
+            style={{ width: tableWidth, minWidth: "100%" }}
+            data-testid="items-table"
+          >
+            <colgroup>
+              {cols.map((c) => (
+                <col key={c.key} style={{ width: c.px }} />
+              ))}
+            </colgroup>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-12">#</TableHead>
-                <TableHead className="w-36">Status</TableHead>
-                <TableHead>Caso</TableHead>
-                <TableHead className="w-36">Celular</TableHead>
-                <TableHead className="w-56">Massa</TableHead>
-                <TableHead className="w-24 text-right">Duração</TableHead>
-                <TableHead className="w-20 text-center">Tent.</TableHead>
-                <TableHead>Erro</TableHead>
-                <TableHead className="w-20">Print</TableHead>
-                <TableHead className="w-28">Logs</TableHead>
-                <TableHead className="w-12" />
+                {cols.map((c) => (
+                  <ResizableHead
+                    key={c.key}
+                    col={c}
+                    onPreview={(w) => columns.preview(c.key, w)}
+                    onCommit={columns.commit}
+                    onReset={() => columns.resize(c.key, null)}
+                  />
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -522,6 +613,7 @@ export function QueueDetail({ id }: { id: string }) {
                         row={r}
                         open={!collapsed.has(r.key)}
                         stats={groupStats(r.ids, byId)}
+                        colSpan={colKeys.length}
                         onToggle={() => toggleCollapsed(r.key)}
                       />
                     ),

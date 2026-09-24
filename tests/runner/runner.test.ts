@@ -474,9 +474,12 @@ describe("runner (modo fake)", () => {
 
     // Act
     await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+    const d = await h.tickUntil(async () => {
+      const dev = (await readWorld(h.dataDir)).devices.find((x) => x.serial === "emulator-5554")!
+      return dev.screen === "off" && dev.forceStops?.length ? dev : undefined
+    })
 
     // Assert
-    const d = (await readWorld(h.dataDir)).devices.find((x) => x.serial === "emulator-5554")!
     expect([d.forceStops, d.screen, d.lockDisabled]).toEqual([["com.exemplo.App.hml"], "off", true])
   })
 
