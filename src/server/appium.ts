@@ -4,23 +4,38 @@ import fsp from "node:fs/promises"
 import path from "node:path"
 
 import type { Config } from "@/core/config"
-import { portsFor } from "@/core/parsers/adb-devices"
+import { appiumGroup } from "@/core/parsers/adb-devices"
 
 import { isAlive, run } from "./exec"
 
+/**
+ * Servidores Appium compartilhados por grupo de celulares (padrão: 5 por servidor).
+ * Um Appium por celular custava ~210 MB × 15 — no limite da RAM do server01.
+ * Sem --session-override (derrubaria as sessões dos vizinhos): as sessões de um celular são
+ * apagadas explicitamente ao fim de cada tentativa (cleanupSessions).
+ */
 export interface AppiumPool {
   url(index: number): string
-  ensure(index: number, serial: string): Promise<void>
+  ensure(index: number): Promise<void>
   isReady(index: number): Promise<boolean>
+  /** Apaga as sessões abertas para o celular (sessão órfã de caso morto por timeout/cancelamento). */
+  cleanupSessions(index: number, serial: string): Promise<number>
   stopAll(): Promise<void>
   /** Mata Appiums que sobraram de uma execução anterior do runner. */
   killStray(): Promise<void>
   openSessions(index: number): Promise<number>
 }
 
+interface SessionInfo {
+  id: string
+  capabilities?: Record<string, unknown>
+}
+
 export function realAppium(cfg: Config): AppiumPool {
-  const procs = new Map<number, number>() // índice → pid
-  const url = (i: number) => `http://127.0.0.1:${portsFor(i, cfg.appiumBasePort).appium}/wd/hub`
+  const procs = new Map<number, number>() // grupo → pid
+  const group = (i: number) => appiumGroup(i, cfg.devicesPerAppium)
+  const port = (i: number) => cfg.appiumBasePort + group(i)
+  const url = (i: number) => `http://127.0.0.1:${port(i)}/wd/hub`
   const env = {
     ...process.env,
     PATH: `${path.dirname(cfg.appiumBin)}:${path.join(cfg.sdkRoot, "platform-tools")}:${path.join(cfg.javaHome, "bin")}:${process.env.PATH ?? ""}`,
@@ -28,40 +43,56 @@ export function realAppium(cfg: Config): AppiumPool {
     ANDROID_SDK_ROOT: cfg.sdkRoot,
     JAVA_HOME: cfg.javaHome,
   }
-  async function isReady(i: number) {
+  async function sessions(i: number): Promise<SessionInfo[]> {
     try {
-      const r = await fetch(`${url(i)}/status`, { signal: AbortSignal.timeout(3000) })
-      const j = (await r.json()) as { value?: { ready?: boolean } }
-      return j.value?.ready === true
+      const r = await fetch(`${url(i)}/appium/sessions`, { signal: AbortSignal.timeout(3000) })
+      const j = (await r.json()) as { value?: SessionInfo[] }
+      return Array.isArray(j.value) ? j.value : []
     } catch {
-      return false
+      return []
     }
   }
   return {
     url,
-    isReady,
-    async ensure(i, serial) {
-      const pid = procs.get(i)
+    async isReady(i) {
+      try {
+        const r = await fetch(`${url(i)}/status`, { signal: AbortSignal.timeout(3000) })
+        const j = (await r.json()) as { value?: { ready?: boolean } }
+        return j.value?.ready === true
+      } catch {
+        return false
+      }
+    },
+    async ensure(i) {
+      const g = group(i)
+      const pid = procs.get(g)
       if (pid && isAlive(pid)) return
-      const logFile = path.join(cfg.dataDir, "logs", `appium-${serial}.log`)
+      const logFile = path.join(cfg.dataDir, "logs", `appium-g${g}.log`)
       await fsp.mkdir(path.dirname(logFile), { recursive: true })
       const out = fs.openSync(logFile, "a")
       const child = spawn(
         cfg.appiumBin,
-        [
-          "--address", "127.0.0.1",
-          "--port", String(portsFor(i, cfg.appiumBasePort).appium),
-          "--base-path", "/wd/hub",
-          "--session-override",
-          "--relaxed-security",
-          "--log-no-colors",
-          "--log-timestamp",
-        ],
+        ["--address", "127.0.0.1", "--port", String(port(i)), "--base-path", "/wd/hub", "--relaxed-security", "--log-no-colors", "--log-timestamp"],
         { stdio: ["ignore", out, out], env, detached: true },
       )
       fs.closeSync(out)
       child.unref()
-      if (child.pid) procs.set(i, child.pid)
+      if (child.pid) procs.set(g, child.pid)
+    },
+    async cleanupSessions(i, serial) {
+      let removed = 0
+      for (const s of await sessions(i)) {
+        const caps = s.capabilities ?? {}
+        const udid = caps.udid ?? caps["appium:udid"] ?? caps.deviceUDID
+        if (udid !== serial) continue
+        try {
+          await fetch(`${url(i)}/session/${s.id}`, { method: "DELETE", signal: AbortSignal.timeout(20_000) })
+          removed++
+        } catch {
+          /* o Appium derruba sozinho pelo newCommandTimeout */
+        }
+      }
+      return removed
     },
     async stopAll() {
       for (const pid of procs.values()) {
@@ -76,32 +107,29 @@ export function realAppium(cfg: Config): AppiumPool {
     },
     async killStray() {
       const uid = String(process.getuid?.() ?? "")
-      for (let i = 1; i <= cfg.maxDevices; i++) {
-        const port = portsFor(i, cfg.appiumBasePort).appium
-        await run("pkill", ["-u", uid, "-f", `appium --address 127\\.0\\.0\\.1 --port ${port} `])
+      for (let p = cfg.appiumBasePort + 1; p <= cfg.appiumBasePort + cfg.maxDevices; p++) {
+        await run("pkill", ["-u", uid, "-f", `appium --address 127\\.0\\.0\\.1 --port ${p} `])
       }
     },
     async openSessions(i) {
-      try {
-        const r = await fetch(`${url(i)}/appium/sessions`, { signal: AbortSignal.timeout(3000) })
-        const j = (await r.json()) as { value?: unknown[] }
-        return Array.isArray(j.value) ? j.value.length : 0
-      } catch {
-        return 0
-      }
+      return (await sessions(i)).length
     },
   }
 }
 
 export function fakeAppium(cfg: Config): AppiumPool {
   const started = new Set<number>()
+  const group = (i: number) => appiumGroup(i, cfg.devicesPerAppium)
   return {
-    url: (i) => `http://127.0.0.1:${portsFor(i, cfg.appiumBasePort).appium}/wd/hub`,
+    url: (i) => `http://127.0.0.1:${cfg.appiumBasePort + group(i)}/wd/hub`,
     async ensure(i) {
-      started.add(i)
+      started.add(group(i))
     },
     async isReady(i) {
-      return started.has(i)
+      return started.has(group(i))
+    },
+    async cleanupSessions() {
+      return 0
     },
     async stopAll() {
       started.clear()

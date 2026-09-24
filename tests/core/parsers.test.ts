@@ -3,7 +3,7 @@ import path from "node:path"
 import { describe, expect, it } from "vitest"
 
 import { apkProblems, parseBadging } from "@/core/parsers/aapt2"
-import { parseAdbDevices, portsFor, serialFromIndex } from "@/core/parsers/adb-devices"
+import { appiumGroup, parseAdbDevices, portsFor, serialFromIndex } from "@/core/parsers/adb-devices"
 import { classifyRun, parseRobotOutput, splitTeardown } from "@/core/parsers/robot-output"
 
 const fx = (p: string) => fs.readFileSync(path.join(__dirname, "../fixtures", p), "utf8")
@@ -283,8 +283,19 @@ describe("portsFor / serialFromIndex", () => {
 
     // Assert
     expect([ports, serialFromIndex(index)]).toEqual([
-      { appium: 4803, system: 8203, mjpeg: 9203, chromedriver: 9603 },
+      { appium: 4801, system: 8203, mjpeg: 9203, chromedriver: 9603 },
       "emulator-5558",
     ])
+  })
+
+  it("um Appium atende cada grupo de 5 celulares", () => {
+    // Arrange
+    const indexes = [1, 5, 6, 10, 11, 15, 18]
+
+    // Act
+    const groups = indexes.map((i) => appiumGroup(i, 5))
+
+    // Assert
+    expect(groups).toEqual([1, 1, 2, 2, 3, 3, 4])
   })
 })

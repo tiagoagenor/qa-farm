@@ -19,6 +19,7 @@ export interface Config {
   sdkRoot: string
   javaHome: string
   appiumBasePort: number
+  devicesPerAppium: number
   maxDevices: number
   installConcurrency: number
 }
@@ -53,6 +54,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sdkRoot,
     javaHome: env.JAVA_HOME ?? path.join(home, "jdk"),
     appiumBasePort: num(env.QAFARM_APPIUM_BASE_PORT, 4800),
+    devicesPerAppium: Math.max(1, num(env.QAFARM_DEVICES_PER_APPIUM, 5)),
     maxDevices: num(env.QAFARM_MAX_DEVICES, 18),
     installConcurrency: num(env.QAFARM_INSTALL_CONCURRENCY, 3),
   }

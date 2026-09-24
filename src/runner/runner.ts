@@ -4,7 +4,7 @@ import path from "node:path"
 
 import type { Config } from "@/core/config"
 import { newId } from "@/core/ids"
-import { parseAdbDevices, portsFor, serialFromIndex } from "@/core/parsers/adb-devices"
+import { parseAdbDevices, serialFromIndex } from "@/core/parsers/adb-devices"
 import { classifyRun } from "@/core/parsers/robot-output"
 import { dataPaths } from "@/core/paths"
 import { applyResult, buildQueue, cancelQueue, failedTestIds, finalizeIfDone } from "@/core/queue-logic"
@@ -459,7 +459,7 @@ export class Runner {
             next.set(d.serial, { ...base, state: "booting" })
             return
           }
-          await this.ad.appium.ensure(idx, d.serial)
+          await this.ad.appium.ensure(idx)
           if (!(await this.ad.appium.isReady(idx))) {
             next.set(d.serial, { ...base, state: "installing", note: "Iniciando Appium" })
             return
@@ -703,6 +703,9 @@ export class Runner {
       screenshots: files.filter((f) => /\.(png|jpe?g)$/i.test(f)).sort(),
     })
     await writeJsonAtomic(path.join(ra.dir, "result.json"), result)
+    // sessão órfã (timeout/cancelamento/robot morto) ocuparia as portas do celular no Appium compartilhado
+    const removed = await this.ad.appium.cleanupSessions(ra.index, ra.serial)
+    if (removed) this.log(`${removed} sessão(ões) do Appium encerrada(s) para ${ra.serial}`)
     this.running.delete(`${ra.queueId}/${ra.itemId}`)
     const q = this.queues.get(ra.queueId)
     if (q) this.setQueue(applyResult(q, ra.itemId, ra.n, result, new Date()))
@@ -735,4 +738,3 @@ export class Runner {
   }
 }
 
-export { portsFor }

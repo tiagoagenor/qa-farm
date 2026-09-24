@@ -72,10 +72,15 @@ export function parseAdbDevices(text: string): AdbDevice[] {
   })
 }
 
-/** Portas fixas por índice de emulador. */
-export function portsFor(index: number, appiumBase = 4800) {
+/** Grupo de Appium do emulador: um servidor Appium atende `perGroup` celulares (1..5 → 1, 6..10 → 2...). */
+export function appiumGroup(index: number, perGroup = 5): number {
+  return Math.ceil(index / Math.max(1, perGroup))
+}
+
+/** Portas fixas por índice de emulador (o Appium é compartilhado pelo grupo). */
+export function portsFor(index: number, appiumBase = 4800, perGroup = 5) {
   return {
-    appium: appiumBase + index,
+    appium: appiumBase + appiumGroup(index, perGroup),
     system: 8200 + index,
     mjpeg: 9200 + index,
     chromedriver: 9600 + index,

@@ -433,15 +433,15 @@ const steps: Record<string, () => Promise<void>> = {
     await sleep(15_000)
     const robots = Number(sh(`pgrep -fc "${pg("qafarm_listener")}" || true`) || 0)
     const sessions: number[] = []
-    for (let i = 1; i <= 15; i++) {
-      const r = sh(`curl -s -m 3 127.0.0.1:${4800 + i}/wd/hub/appium/sessions`)
+    for (let g = 1; g <= Math.ceil(15 / cfg.devicesPerAppium); g++) {
+      const r = sh(`curl -s -m 3 127.0.0.1:${cfg.appiumBasePort + g}/wd/hub/appium/sessions`)
       try {
         sessions.push((JSON.parse(r).value as unknown[]).length)
       } catch {
         sessions.push(-1)
       }
     }
-    record("T4.4", robots === 0 && sessions.every((n) => n === 0), `robots vivos: ${robots}; sessões Appium por celular: ${sessions.join(",")}`)
+    record("T4.4", robots === 0 && sessions.every((n) => n === 0), `robots vivos: ${robots}; sessões abertas por servidor Appium (${sessions.length} servidores): ${sessions.join(",")}`)
   },
 
   async t6() {
