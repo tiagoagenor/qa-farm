@@ -53,6 +53,8 @@ describe("realFarm (Linux, com flock)", () => {
     const lock = path.join(dir, "run", "farm-ops.lock")
     await fs.mkdir(path.dirname(lock), { recursive: true })
     const holder = execFileSync("bash", ["-c", `setsid nohup flock ${lock} sleep 30 >/dev/null 2>&1 & echo $!`], { encoding: "utf8" }).trim()
+    // espera o lock estar de fato ocupado (flock -n falha)
+    execFileSync("bash", ["-c", `for i in $(seq 1 50); do flock -n ${lock} true || exit 0; sleep 0.1; done; exit 1`])
 
     // Act
     const t0 = Date.now()
