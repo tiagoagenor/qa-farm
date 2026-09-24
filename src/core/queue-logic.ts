@@ -153,6 +153,8 @@ export interface QueueSummary {
   finished: number
   progress: number // 0..1
   avgDurationSec: number | null
+  minDurationSec: number | null
+  maxDurationSec: number | null
   startedAt?: string
   lastEndedAt?: string
 }
@@ -187,9 +189,17 @@ export function summarize(queue: Queue): QueueSummary {
     finished,
     progress: total === 0 ? 1 : finished / total,
     avgDurationSec: durations.length ? durations.reduce((s, d) => s + d, 0) / durations.length : null,
+    minDurationSec: durations.length ? Math.min(...durations) : null,
+    maxDurationSec: durations.length ? Math.max(...durations) : null,
     startedAt,
     lastEndedAt,
   }
+}
+
+/** Tempo total da fila: desde a criação até terminar (ou até `now`, se ainda está ativa). */
+export function queueElapsedSec(queue: { createdAt: string; finishedAt?: string | null }, nowMs: number): number {
+  const end = queue.finishedAt ? Date.parse(queue.finishedAt) : nowMs
+  return Math.max(0, (end - Date.parse(queue.createdAt)) / 1000)
 }
 
 /**

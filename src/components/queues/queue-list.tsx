@@ -23,7 +23,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { usePoll } from "@/hooks/use-poll"
 import { sendCommand } from "@/lib/client"
-import { durationBetween, formatDateTime, formatDuration, QUEUE_STATUS } from "@/lib/format"
+import { useLiveNow } from "@/hooks/use-live-now"
+import { queueElapsedSec } from "@/core/queue-logic"
+import { formatDateTime, formatDuration, QUEUE_STATUS } from "@/lib/format"
 
 import type { QueueSummaryDto } from "./types"
 
@@ -105,10 +107,18 @@ export function DeleteQueueButton({
   )
 }
 
+/** Início = entrada na fila; fim = término (fila terminada sem `finishedAt` usa o último caso). */
+export function elapsedRange(q: Pick<QueueSummaryDto, "createdAt" | "finishedAt" | "status" | "lastEndedAt">) {
+  const ended = q.status === "done" || q.status === "canceled"
+  return { createdAt: q.createdAt, finishedAt: q.finishedAt ?? (ended ? (q.lastEndedAt ?? q.createdAt) : null) }
+}
+
 export function QueueList() {
-  const { data, loading, reload } = usePoll<{ queues: QueueSummaryDto[] }>("/api/queues", 5000)
+  const { data, loading, reload } = usePoll<{ queues: QueueSummaryDto[]; serverNow?: string }>("/api/queues", 5000)
   const queues = data?.queues ?? []
   const finished = queues.filter((q) => q.status === "done" || q.status === "canceled")
+  // o contador de duração avança a cada segundo enquanto houver fila ativa (sem esperar o próximo poll)
+  const now = useLiveNow(data?.serverNow, finished.length < queues.length)
   const active = queues.length - finished.length
   return (
     <div>
@@ -197,7 +207,7 @@ export function QueueList() {
                     {q.counts.failed + q.counts.timeout + q.counts.infra_error + q.counts.config_error}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {formatDuration(durationBetween(q.startedAt, q.finishedAt ?? (q.status === "running" ? undefined : q.lastEndedAt)))}
+                    <span data-testid="queue-duration">{formatDuration(queueElapsedSec(elapsedRange(q), now), true)}</span>
                   </TableCell>
                   <TableCell>
                     <DeleteQueueButton q={q} onDeleted={() => void reload()} />

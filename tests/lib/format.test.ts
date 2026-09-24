@@ -22,6 +22,24 @@ describe("formatDuration", () => {
   })
 })
 
+describe("formatDuration preciso (contador ao vivo)", () => {
+  it.each([
+    [5, "5s"],
+    [120, "2min 0s"],
+    [3725, "1h 2min 5s"],
+    [59.9, "59s"],
+  ])("%s → %s", (sec, expected) => {
+    // Arrange
+    const input = sec
+
+    // Act
+    const out = formatDuration(input, true)
+
+    // Assert
+    expect(out).toBe(expected)
+  })
+})
+
 describe("durationBetween", () => {
   it("usa o agora quando a tentativa ainda não terminou", () => {
     // Arrange

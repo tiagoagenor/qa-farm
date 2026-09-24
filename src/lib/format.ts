@@ -39,14 +39,18 @@ export const TONE_CLASS: Record<Tone, string> = {
   muted: "bg-muted text-muted-foreground border-border",
 }
 
-/** 75 → "1min 15s"; 3725 → "1h 2min". */
-export function formatDuration(sec: number | null | undefined): string {
+/**
+ * 75 → "1min 15s"; 3725 → "1h 2min". Com `precise` (contador ao vivo) mostra sempre os segundos:
+ * 3725 → "1h 2min 5s", 120 → "2min 0s".
+ */
+export function formatDuration(sec: number | null | undefined, precise = false): string {
   if (sec === null || sec === undefined || !Number.isFinite(sec)) return "—"
-  const s = Math.max(0, Math.round(sec))
+  const s = Math.max(0, Math.floor(precise ? sec : Math.round(sec)))
   if (s < 60) return `${s}s`
   const m = Math.floor(s / 60)
-  if (m < 60) return s % 60 ? `${m}min ${s % 60}s` : `${m}min`
+  if (m < 60) return precise || s % 60 ? `${m}min ${s % 60}s` : `${m}min`
   const h = Math.floor(m / 60)
+  if (precise) return `${h}h ${m % 60}min ${s % 60}s`
   return m % 60 ? `${h}h ${m % 60}min` : `${h}h`
 }
 

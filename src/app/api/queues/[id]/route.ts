@@ -11,5 +11,5 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const [q, devices] = await Promise.all([readQueue(id), devicesState()])
   if (!q) return error("Fila não encontrada", 404)
   const ready = devices.devices.filter((d) => d.kind === "emulator" && (d.state === "ready" || d.state === "busy")).length
-  return json({ summary: queueSummary(q, ready), queue: q }, noStore)
+  return json({ summary: queueSummary(q, ready), queue: q, serverNow: new Date().toISOString() }, noStore)
 }

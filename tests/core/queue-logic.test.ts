@@ -7,6 +7,7 @@ import {
   failedTestIds,
   minTheoreticalSec,
   nextItemStatus,
+  queueElapsedSec,
   reopenItem,
   summarize,
 } from "@/core/queue-logic"
@@ -173,7 +174,7 @@ describe("summarize", () => {
     expect([s.counts.passed, s.counts.failed, s.counts.queued, s.finished, s.progress]).toEqual([1, 1, 1, 2, 2 / 3])
   })
 
-  it("média de duração considera só tentativas concluídas com passou/falhou", () => {
+  it("média, menor e maior duração consideram só tentativas concluídas com passou/falhou", () => {
     // Arrange
     const a1 = attempt({ startedAt: "2026-09-24T10:00:00.000Z", endedAt: "2026-09-24T10:01:00.000Z", status: "passed" })
     const a2 = attempt({ startedAt: "2026-09-24T10:00:00.000Z", endedAt: "2026-09-24T10:03:00.000Z", status: "failed" })
@@ -184,7 +185,42 @@ describe("summarize", () => {
     const s = summarize(q)
 
     // Assert
-    expect(s.avgDurationSec).toBe(120)
+    expect([s.avgDurationSec, s.minDurationSec, s.maxDurationSec]).toEqual([120, 60, 180])
+  })
+
+  it("sem casos terminados não há média, mínimo nem máximo", () => {
+    // Arrange
+    const q = queue([item("A")])
+
+    // Act
+    const s = summarize(q)
+
+    // Assert
+    expect([s.avgDurationSec, s.minDurationSec, s.maxDurationSec]).toEqual([null, null, null])
+  })
+})
+
+describe("queueElapsedSec", () => {
+  it("fila ativa conta da criação até agora", () => {
+    // Arrange
+    const q = { createdAt: "2026-09-24T10:00:00.000Z", finishedAt: undefined }
+
+    // Act
+    const sec = queueElapsedSec(q, Date.parse("2026-09-24T10:02:30.000Z"))
+
+    // Assert
+    expect(sec).toBe(150)
+  })
+
+  it("fila terminada para de contar no fim", () => {
+    // Arrange
+    const q = { createdAt: "2026-09-24T10:00:00.000Z", finishedAt: "2026-09-24T10:01:00.000Z" }
+
+    // Act
+    const sec = queueElapsedSec(q, Date.parse("2026-09-24T12:00:00.000Z"))
+
+    // Assert
+    expect(sec).toBe(60)
   })
 })
 

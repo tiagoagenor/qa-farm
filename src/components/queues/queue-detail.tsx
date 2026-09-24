@@ -25,13 +25,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useLiveNow } from "@/hooks/use-live-now"
 import { usePoll } from "@/hooks/use-poll"
 import { sendCommand } from "@/lib/client"
 import { durationBetween, formatDateTime, formatDuration, ITEM_STATUS, QUEUE_STATUS, runFileUrl } from "@/lib/format"
-import { RETRYABLE_ITEM_STATUSES } from "@/core/queue-logic"
+import { queueElapsedSec, RETRYABLE_ITEM_STATUSES } from "@/core/queue-logic"
 
 import { ItemSheet } from "./item-sheet"
-import { DeleteQueueButton, ResultBar } from "./queue-list"
+import { DeleteQueueButton, elapsedRange, ResultBar } from "./queue-list"
 import type { QueueDetailDto } from "./types"
 
 const TABS: Array<{ value: string; label: string; match: (s: ItemStatus) => boolean }> = [
@@ -42,12 +43,14 @@ const TABS: Array<{ value: string; label: string; match: (s: ItemStatus) => bool
   { value: "passed", label: "Passou", match: (s) => s === "passed" },
 ]
 
-function Stat({ label, value, tone }: { label: string; value: React.ReactNode; tone?: string }) {
+function Stat({ label, value, tone, testId }: { label: string; value: React.ReactNode; tone?: string; testId?: string }) {
   return (
     <Card className="py-3">
       <CardContent className="px-4">
         <p className="text-muted-foreground text-xs">{label}</p>
-        <p className={`text-2xl font-semibold tabular-nums ${tone ?? ""}`}>{value}</p>
+        <p className={`text-2xl font-semibold tabular-nums ${tone ?? ""}`} data-testid={testId}>
+          {value}
+        </p>
       </CardContent>
     </Card>
   )
@@ -68,6 +71,8 @@ export function QueueDetail({ id }: { id: string }) {
   }, [items])
   const visible = items.filter((i) => TABS.find((t) => t.value === tab)!.match(i.status))
   const selectedItem: Item | null = items.find((i) => i.id === openItem) ?? null
+  const live = data?.queue.status === "running" || data?.queue.status === "paused" || items.some((i) => i.status === "running")
+  const now = useLiveNow(data?.serverNow, live)
 
   if (loading && !data) return <Skeleton className="h-64" />
   if (error && !data) return <EmptyState title="Fila não encontrada">{error}</EmptyState>
@@ -152,6 +157,13 @@ export function QueueDetail({ id }: { id: string }) {
         <Stat label="Total" value={s.total} />
       </div>
 
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Stat label="Tempo total" value={formatDuration(queueElapsedSec(elapsedRange({ ...s, finishedAt: q.finishedAt ?? null }), now), true)} testId="time-total" />
+        <Stat label="Tempo médio por caso" value={formatDuration(s.avgDurationSec, true)} testId="time-avg" />
+        <Stat label="Caso mais rápido" value={formatDuration(s.minDurationSec, true)} testId="time-min" />
+        <Stat label="Caso mais lento" value={formatDuration(s.maxDurationSec, true)} testId="time-max" />
+      </div>
+
       <Card className="mb-4 py-4">
         <CardContent className="grid gap-2 px-4">
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -159,9 +171,7 @@ export function QueueDetail({ id }: { id: string }) {
               {s.finished} de {s.total} concluído(s) · {Math.round(s.progress * 100)}%
             </span>
             <span className="text-muted-foreground">
-              decorrido {formatDuration(durationBetween(s.startedAt, q.finishedAt))}
-              {active && s.minTheoreticalSec > 0 && ` · restante mínimo ~${formatDuration(s.minTheoreticalSec)}`}
-              {s.avgDurationSec !== null && ` · média ${formatDuration(s.avgDurationSec)} por caso`}
+              {active && s.minTheoreticalSec > 0 && `restante mínimo ~${formatDuration(s.minTheoreticalSec)}`}
             </span>
           </div>
           <ResultBar s={s} />
@@ -215,7 +225,7 @@ export function QueueDetail({ id }: { id: string }) {
                     </TableCell>
                     <TableCell className="font-mono text-xs">{a?.serial ?? "—"}</TableCell>
                     <TableCell className="text-right text-xs tabular-nums">
-                      {a ? formatDuration(durationBetween(a.startedAt, a.endedAt)) : "—"}
+                      {a ? formatDuration(durationBetween(a.startedAt, a.endedAt, now), !a.endedAt) : "—"}
                     </TableCell>
                     <TableCell className="text-center tabular-nums">{it.attempts.length}</TableCell>
                     <TableCell className="max-w-[320px]">

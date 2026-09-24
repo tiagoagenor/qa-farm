@@ -14,6 +14,8 @@ export interface QueueSummaryDto {
   finished: number
   progress: number
   avgDurationSec: number | null
+  minDurationSec: number | null
+  maxDurationSec: number | null
   startedAt?: string
   lastEndedAt?: string
   minTheoreticalSec: number
@@ -22,4 +24,5 @@ export interface QueueSummaryDto {
 export interface QueueDetailDto {
   summary: QueueSummaryDto
   queue: Queue
+  serverNow?: string
 }
