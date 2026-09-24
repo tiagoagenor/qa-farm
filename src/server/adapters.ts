@@ -5,6 +5,7 @@ import { type Adb, fakeAdb, realAdb } from "./adb"
 import { type AppiumPool, fakeAppium, realAppium } from "./appium"
 import { type CatalogBuilder, fakeCatalog, realCatalog } from "./catalog"
 import { type Farm, fakeFarm, realFarm } from "./farm"
+import { fakeHostMetrics, type HostMetrics, realHostMetrics } from "./host-metrics"
 import { fakeRobot, realRobot, type RobotLauncher } from "./robot"
 import { fakeSnapshots, realSnapshots, type SnapshotProvider } from "./snapshot"
 
@@ -16,6 +17,7 @@ export interface Adapters {
   aapt2: Aapt2
   catalog: CatalogBuilder
   snapshots: SnapshotProvider
+  metrics: HostMetrics
 }
 
 export function createAdapters(cfg: Config): Adapters {
@@ -28,6 +30,7 @@ export function createAdapters(cfg: Config): Adapters {
       aapt2: fakeAapt2(cfg),
       catalog: fakeCatalog(cfg),
       snapshots: fakeSnapshots(cfg),
+      metrics: fakeHostMetrics(cfg),
     }
   }
   return {
@@ -38,5 +41,6 @@ export function createAdapters(cfg: Config): Adapters {
     aapt2: realAapt2(cfg),
     catalog: realCatalog(cfg),
     snapshots: realSnapshots(cfg),
+    metrics: realHostMetrics(),
   }
 }

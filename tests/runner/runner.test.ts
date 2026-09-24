@@ -6,6 +6,7 @@ import { accountOverlaps, deviceOverlaps, peakConcurrency } from "@/core/overlap
 import { TERMINAL_ITEM_STATUSES } from "@/core/queue-logic"
 import { readJson, writeJsonAtomic } from "@/core/store"
 import { DevicesStateSchema, type Queue, RunnerStateSchema } from "@/core/types"
+import { MetricsFileSchema } from "@/core/metrics"
 import { readWorld } from "@/server/fake-world"
 
 import { type Harness, makeHarness, queueInput } from "./harness"
@@ -652,6 +653,58 @@ describe("runner (modo fake)", () => {
     // Assert
     const d = (await readWorld(h.dataDir)).devices[0]
     expect([asleep, d.screen]).toEqual(["off", "on"])
+  })
+
+  it("processador quente segura casos novos, deixa o caso em andamento terminar e libera ao esfriar", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    await h.tickUntil(async () => (await h.readyCount()) >= 1 || undefined)
+    const ids = await h.catalogIds((n) => ["CT_LOGIN_05-Caso-SLOW-PASS", "CT_PIX_02-Caso-PASS"].includes(n))
+    const qid = (await h.command({ type: "create_queue", input: { ...queueInput(ids), allowSameAccount: true } })).data!.queueId as string
+    await h.tickUntil(() => h.runner.snapshotForTests().running[0])
+    await h.world((w) => {
+      w.tempC = 90
+    })
+
+    // Act
+    await h.tickUntil(() => liveQueue(qid)!.items.some((i) => i.status === "passed") || undefined)
+    for (let i = 0; i < 5; i++) await h.runner.tick()
+    const startedWhileHot = liveQueue(qid)!.items.filter((i) => i.attempts.length > 0).length
+    await h.world((w) => {
+      w.tempC = 50
+    })
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+
+    // Assert
+    expect([startedWhileHot, liveQueue(qid)!.items.map((i) => i.status), h.logs.some((l) => l.includes("saúde crítica"))]).toEqual([
+      1,
+      ["passed", "passed"],
+      true,
+    ])
+  })
+
+  it("grava a saúde da máquina em state/metrics.json com o histórico", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    await h.world((w) => {
+      w.tempC = 55
+      w.cpuPct = 42
+    })
+
+    // Act
+    await h.tickUntil(async () => {
+      const m = await readJson(h.p.metrics, MetricsFileSchema.nullable(), null)
+      return m?.machines[0]?.sample?.temp.packageC === 55 ? m : undefined
+    })
+
+    // Assert
+    const m = (await readJson(h.p.metrics, MetricsFileSchema.nullable(), null))!
+    expect([m.machines[0].id, m.machines[0].role, m.machines[0].sample!.cpuPct, m.machines[0].health.level]).toEqual([
+      "server01",
+      "master",
+      42,
+      "ok",
+    ])
   })
 
   it("a massa usada no caso fica registrada na tentativa (conta e dados gerados)", async () => {

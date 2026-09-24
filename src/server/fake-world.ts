@@ -28,6 +28,9 @@ const WorldSchema = z.object({
   installDelayMs: z.number(),
   devices: z.array(FakeDeviceSchema),
   memAvailableMb: z.number().optional(), // memória livre simulada do servidor (padrão: sobra)
+  cpuPct: z.number().optional(), // saúde simulada (página Máquinas / freio)
+  tempC: z.number().optional(),
+  swapUsedPct: z.number().optional(),
 })
 export type World = z.infer<typeof WorldSchema>
 

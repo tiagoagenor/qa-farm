@@ -1,6 +1,6 @@
 "use client"
 
-import { AlertTriangle, Boxes, ListChecks, LogOut, Moon, Package, Smartphone, Sun } from "lucide-react"
+import { AlertTriangle, Boxes, ListChecks, LogOut, Moon, Package, Server, Smartphone, Sun } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
@@ -35,6 +35,7 @@ export interface Overview {
   }
   devices: { total: number; emulators: number; ready: number; busy: number; desired: number }
   activeQueues: number
+  health?: "ok" | "warn" | "crit"
 }
 
 const NAV = [
@@ -46,8 +47,24 @@ const NAV = [
     icon: Smartphone,
     badge: (o: Overview) => (o.devices.emulators ? `${o.devices.ready + o.devices.busy}/${o.devices.emulators}` : null),
   },
+  { href: "/maquinas", label: "Máquinas", icon: Server, badge: () => null },
   { href: "/apps", label: "Apps", icon: Package, badge: () => null },
 ]
+
+/** Ponto de alerta no menu: vermelho = alguma máquina crítica; amarelo = atenção. */
+function HealthDot({ level }: { level?: Overview["health"] }) {
+  if (!level || level === "ok") return null
+  return (
+    <SidebarMenuBadge>
+      <span
+        className={`inline-block size-2.5 rounded-full ${level === "crit" ? "bg-red-500" : "bg-amber-500"}`}
+        aria-label={level === "crit" ? "Máquina em estado crítico" : "Máquina em atenção"}
+        data-testid="health-dot"
+        data-level={level}
+      />
+    </SidebarMenuBadge>
+  )
+}
 
 function RunnerBanner({ o }: { o: Overview | null }) {
   if (!o) return null
@@ -109,6 +126,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         </Link>
                       </SidebarMenuButton>
                       {badge !== null && <SidebarMenuBadge>{badge}</SidebarMenuBadge>}
+                      {n.href === "/maquinas" && <HealthDot level={overview?.health} />}
                     </SidebarMenuItem>
                   )
                 })}

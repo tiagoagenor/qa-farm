@@ -1,11 +1,12 @@
-import { devicesState, listQueues, runnerStatus } from "@/server/web/data"
+import { devicesState, listQueues, readMetrics, runnerStatus } from "@/server/web/data"
 import { json, noStore } from "@/server/web/http"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 export async function GET() {
-  const [runner, devices, queues] = await Promise.all([runnerStatus(), devicesState(), listQueues()])
+  const [runner, devices, queues, metrics] = await Promise.all([runnerStatus(), devicesState(), listQueues(), readMetrics()])
+  const levels = metrics.machines.map((m) => (m.ageMs !== null && m.ageMs > 15_000 ? "warn" : m.health.level))
   const emulators = devices.devices.filter((d) => d.kind === "emulator")
   return json(
     {
@@ -18,6 +19,7 @@ export async function GET() {
         desired: devices.desired,
       },
       activeQueues: queues.filter((q) => q.status === "running" || q.status === "paused").length,
+      health: levels.includes("crit") ? "crit" : levels.includes("warn") ? "warn" : "ok",
     },
     noStore,
   )

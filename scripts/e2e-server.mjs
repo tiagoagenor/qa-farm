@@ -19,6 +19,8 @@ const env = {
   QAFARM_SECRET: "e2e-segredo",
   QAFARM_FAKE_SCENARIO: path.join(root, "tests/fixtures/fake-scenario.json"),
   QAFARM_FAKE_SPEED: process.env.QAFARM_FAKE_SPEED ?? "0.4",
+  QAFARM_MACHINE_ID: "server01",
+  QAFARM_HEALTH_CLEAR_HOLD_MS: "0",
 }
 if (process.env.E2E_SKIP_BUILD !== "1") {
   execFileSync(bin("next"), ["build"], { cwd: root, stdio: "inherit", env })

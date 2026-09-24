@@ -34,6 +34,9 @@ export async function makeHarness(opts: { emulators?: number; physical?: string[
     QAFARM_DATA_DIR: dataDir,
     QAFARM_REPO_ROOT: REPO,
     QAFARM_FAKE_IO_DELAY_MS: String(opts.ioDelayMs ?? 0),
+    QAFARM_METRICS_INTERVAL_MS: "0",
+    QAFARM_HEALTH_CLEAR_HOLD_MS: "0",
+    QAFARM_MACHINE_ID: "server01",
   } as unknown as NodeJS.ProcessEnv)
   const p = dataPaths(dataDir)
   // app já enviado

@@ -4,6 +4,8 @@ import path from "node:path"
 
 import type { Config } from "@/core/config"
 import { newId } from "@/core/ids"
+import { evaluateHealth, type HealthResult, type HealthState } from "@/core/health"
+import { type HostSample, MetricsFileSchema, MetricsHistory } from "@/core/metrics"
 import { parseMassa } from "@/core/massa"
 import { nextPhysicalIndex, parseAdbDevices, serialFromIndex } from "@/core/parsers/adb-devices"
 import { classifyRun } from "@/core/parsers/robot-output"
@@ -82,6 +84,15 @@ export class Runner {
   private desired = 0
   private lastDesiredAttempt = 0
   private lastLowMemLog = 0
+  // saúde desta máquina (memória, CPU, temperatura): leitura periódica, histórico curto e freio
+  private metricsHistory = new MetricsHistory()
+  private healthState: HealthState = {}
+  private lastSample: HostSample | null = null
+  private health: HealthResult | null = null
+  private lastMetricsAt = 0
+  private lastMetricsWrite = 0
+  private lastHealthLevel: HealthResult["level"] = "ok"
+  private lastBrakeLog = 0
   private lastDeviceRefresh = 0
   private adbRaw = ""
   private catalog: Catalog | null = null
@@ -153,6 +164,8 @@ export class Runner {
     this.desired = (await readJson(this.p.desired, DesiredSchema, { devices: 0 })).devices
     this.physical = new Map(Object.entries((await readJson(this.p.physical, PhysicalStateSchema, { enabled: {} })).enabled))
     this.disabledEmulators = new Set((await readJson(this.p.emulatorsDisabled, EmulatorsDisabledSchema, { disabled: [] })).disabled)
+    const saved = await readJson(this.p.metrics, MetricsFileSchema.nullable(), null)
+    this.metricsHistory = new MetricsHistory(saved?.machines.find((m) => m.id === this.cfg.machineId)?.history ?? [])
     this.catalog = await readJson(this.p.catalog, CatalogSchema.nullable(), null)
     this.catalogStatus = this.catalog ? "ready" : "missing"
     await this.pickActiveApp()
@@ -173,6 +186,7 @@ export class Runner {
       this.reconcileFarm()
       this.processFarmOps()
       await this.reconcileOrphans()
+      await this.collectMetrics()
       await this.dispatch()
       await this.writeRunnerState()
     } catch (e) {
@@ -185,6 +199,53 @@ export class Runner {
   async shutdown(): Promise<void> {
     await this.writeRunnerState()
     await Promise.all([...this.writeChains.values()])
+  }
+
+  // ------------------------------------------------------- saúde da máquina ---
+  /** Lê memória/CPU/temperatura a cada `metricsIntervalMs`, avalia os alertas e grava state/metrics.json. */
+  private async collectMetrics(): Promise<void> {
+    const now = Date.now()
+    if (now - this.lastMetricsAt < this.cfg.metricsIntervalMs) return
+    this.lastMetricsAt = now
+    let sample: HostSample
+    try {
+      sample = await this.ad.metrics.sample()
+    } catch (e) {
+      this.log(`falha ao ler a saúde da máquina: ${(e as Error).message}`)
+      return
+    }
+    this.lastSample = sample
+    this.metricsHistory.add(sample)
+    const h = evaluateHealth(sample, this.healthState, now, this.cfg.health)
+    this.healthState = h.state
+    const wasBraking = this.health?.brake ?? false
+    this.health = h
+    const crit = h.alerts.filter((a) => a.level === "crit").map((a) => a.message)
+    if (h.brake && !wasBraking) this.log(`saúde crítica (${crit.join("; ")}): novos casos aguardam`)
+    if (!h.brake && wasBraking) this.log("saúde normalizada: novos casos liberados")
+    const levelChanged = h.level !== this.lastHealthLevel
+    this.lastHealthLevel = h.level
+    if (levelChanged || now - this.lastMetricsWrite >= 5000) {
+      this.lastMetricsWrite = now
+      await this.writeMetrics()
+    }
+  }
+
+  private async writeMetrics(): Promise<void> {
+    const h = this.health
+    await writeJsonAtomic(this.p.metrics, {
+      updatedAt: new Date().toISOString(),
+      machines: [
+        {
+          id: this.cfg.machineId,
+          name: this.cfg.machineId,
+          role: "master",
+          sample: this.lastSample ? { ...this.lastSample, emulatorsRunning: [...this.devices.values()].filter((d) => d.kind === "emulator").length } : null,
+          history: this.metricsHistory.list(),
+          health: h ? { level: h.level, alerts: h.alerts, brake: h.brake, blockStart: h.blockStart } : { level: "ok", alerts: [], brake: false, blockStart: false },
+        },
+      ],
+    })
   }
 
   // --------------------------------------------------------- persistência ---
@@ -701,6 +762,7 @@ export class Runner {
   // ---------------------------------------------------------------- fazenda ---
   private reconcileFarm(): void {
     if (this.desired <= 0 || this.farmBusy || this.farmOps.length > 0) return
+    if (this.health?.blockStart) return // disco quase cheio: não liga emuladores novos
     if (Date.now() - this.lastDesiredAttempt < DESIRED_RETRY_MS) return
     const present = new Set([...this.devices.values()].filter((d) => d.kind === "emulator").map((d) => d.index))
     const missing = Array.from({ length: this.desired }, (_, k) => k + 1).filter((i) => !present.has(i) && !this.maintenance.has(i))
@@ -768,6 +830,14 @@ export class Runner {
       const it = this.queues.get(r.queueId)?.items.find((i) => i.id === r.itemId)
       return { queueId: r.queueId, itemId: r.itemId, serial: r.serial, accounts: it?.accounts ?? [] }
     })
+    // saúde crítica (temperatura, swap trocando, CPU saturada): segura casos novos; os que estão rodando seguem
+    if (this.health?.brake) {
+      if (Date.now() - this.lastBrakeLog > 60_000) {
+        this.lastBrakeLog = Date.now()
+        this.log(`freio de saúde ativo (${this.health.alerts.filter((a) => a.level === "crit").map((a) => a.message).join("; ")}): novos casos aguardam`)
+      }
+      return
+    }
     let memMb = await this.ad.farm.memAvailableMb()
     for (const a of schedule(queues, free, running)) {
       // sem memória livre, o caso espera na fila: com emuladores rodando teste o servidor pode travar (OOM)

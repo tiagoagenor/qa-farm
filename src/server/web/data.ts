@@ -5,6 +5,7 @@ import path from "node:path"
 
 import { newId } from "@/core/ids"
 import { parseMassa } from "@/core/massa"
+import { MetricsFileSchema } from "@/core/metrics"
 import { minTheoreticalSec, summarize } from "@/core/queue-logic"
 import { listJsonFiles, readJson, writeJsonAtomic } from "@/core/store"
 import {
@@ -30,6 +31,16 @@ export async function runnerStatus() {
   const state = await readJson(p.runnerState, RunnerStateSchema.nullable(), null)
   const ageMs = state ? Date.now() - Date.parse(state.heartbeatAt) : null
   return { state, ageMs, alive: ageMs !== null && ageMs < HEARTBEAT_STALE_MS }
+}
+
+/** Saúde das máquinas (state/metrics.json, gravado pelo runner). `ageMs` = idade da última leitura. */
+export async function readMetrics() {
+  const m = await readJson(ctx().p.metrics, MetricsFileSchema.nullable(), null)
+  const now = Date.now()
+  return {
+    updatedAt: m?.updatedAt ?? null,
+    machines: (m?.machines ?? []).map((x) => ({ ...x, ageMs: x.sample ? now - Date.parse(x.sample.at) : null })),
+  }
 }
 
 export async function devicesState() {

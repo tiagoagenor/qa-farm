@@ -1,6 +1,8 @@
 import os from "node:os"
 import path from "node:path"
 
+import { type HealthConfig, healthConfigFromEnv } from "./health"
+
 export interface Config {
   repoRoot: string
   dataDir: string
@@ -30,6 +32,11 @@ export interface Config {
   /** Memória que cada caso novo acrescenta enquanto roda (Robot + sessão Appium), descontada ao começar vários de uma vez. */
   caseMemMb: number
   installConcurrency: number
+  /** nome desta máquina no painel (a mestre) */
+  machineId: string
+  /** intervalo de leitura da saúde da máquina (ms) */
+  metricsIntervalMs: number
+  health: HealthConfig
 }
 
 function num(v: string | undefined, fallback: number): number {
@@ -69,5 +76,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     caseMemMb: num(env.QAFARM_CASE_MEM_MB, 150),
     // troca de versão do APK: instala em até 5 celulares ao mesmo tempo (cada emulador usa os próprios núcleos)
     installConcurrency: num(env.QAFARM_INSTALL_CONCURRENCY, 5),
+    machineId: env.QAFARM_MACHINE_ID || os.hostname().split(".")[0] || "server01",
+    metricsIntervalMs: num(env.QAFARM_METRICS_INTERVAL_MS, 2000),
+    health: { ...healthConfigFromEnv(env), memCritMb: num(env.QAFARM_MIN_FREE_MEM_MB, 1500) },
   }
 }
