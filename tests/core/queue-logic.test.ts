@@ -7,6 +7,7 @@ import {
   failedTestIds,
   minTheoreticalSec,
   nextItemStatus,
+  reopenItem,
   summarize,
 } from "@/core/queue-logic"
 import { attempt, entry, item, queue } from "../helpers/builders"
@@ -230,5 +231,50 @@ describe("failedTestIds", () => {
 
     // Assert
     expect(ids).toEqual(["t:A", "t:B", "t:C"])
+  })
+})
+
+describe("reopenItem", () => {
+  it("caso que falhou volta para a fila e a fila concluída volta a rodar", () => {
+    // Arrange
+    const q = queue(
+      [item("A", [], { status: "failed", failRetries: 1, attempts: [attempt({ status: "failed" })] }), item("B", [], { status: "passed" })],
+      { status: "done", finishedAt: NOW.toISOString() },
+    )
+
+    // Act
+    const out = reopenItem(q, "A")!
+
+    // Assert
+    expect([out.status, out.finishedAt, out.items[0].status, out.items[0].failRetries, out.items[0].attempts.length, out.items[1].status]).toEqual([
+      "running",
+      undefined,
+      "queued",
+      0,
+      1,
+      "passed",
+    ])
+  })
+
+  it.each(["timeout", "infra_error", "config_error"] as const)("aceita caso com status %s", (status) => {
+    // Arrange
+    const q = queue([item("A", [], { status })], { status: "done" })
+
+    // Act
+    const out = reopenItem(q, "A")
+
+    // Assert
+    expect(out?.items[0].status).toBe("queued")
+  })
+
+  it.each(["passed", "running", "queued"] as const)("recusa caso com status %s", (status) => {
+    // Arrange
+    const q = queue([item("A", [], { status })])
+
+    // Act
+    const out = reopenItem(q, "A")
+
+    // Assert
+    expect(out).toBeNull()
   })
 })

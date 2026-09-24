@@ -7,7 +7,7 @@ import { newId } from "@/core/ids"
 import { parseAdbDevices, serialFromIndex } from "@/core/parsers/adb-devices"
 import { classifyRun } from "@/core/parsers/robot-output"
 import { dataPaths } from "@/core/paths"
-import { applyResult, buildQueue, cancelQueue, failedTestIds, finalizeIfDone } from "@/core/queue-logic"
+import { applyResult, buildQueue, cancelQueue, failedTestIds, finalizeIfDone, reopenItem } from "@/core/queue-logic"
 import { buildRobotArgs, buildRobotEnv } from "@/core/robot-args"
 import { type Assignment, schedule } from "@/core/scheduler"
 import { listJsonFiles, readJson, writeJsonAtomic } from "@/core/store"
@@ -365,6 +365,38 @@ export class Runner {
           input: { name: `${q.name} · re-run falhas`, appId: q.appId, env: q.env, timeoutSec: q.options.timeoutSec, retries: q.options.retries, testIds: ids },
         })
       }
+      case "retry_item": {
+        const q = this.queues.get(c.queueId)
+        if (!q) return { ok: false, message: "Fila não encontrada" }
+        const other = [...this.queues.values()].find(
+          (x) => x.id !== q.id && (x.status === "running" || x.status === "paused") && x.appId !== q.appId && x.items.some((i) => i.status === "queued" || i.status === "running"),
+        )
+        if (other) return { ok: false, message: `A fila "${other.name}" usa outro app. Aguarde ou cancele antes de rodar este caso de novo.` }
+        const it = q.items.find((i) => i.id === c.itemId)
+        const reopened = this.updateQueue(q.id, (cur) => reopenItem(cur, c.itemId) ?? cur)
+        if (!reopened || reopened.items.find((i) => i.id === c.itemId)?.status !== "queued") {
+          return { ok: false, message: "Só é possível rodar de novo um caso que falhou" }
+        }
+        await this.pickActiveApp()
+        return { ok: true, message: `"${it?.name}" voltou para a fila`, data: { queueId: q.id, itemId: c.itemId } }
+      }
+      case "delete_queue": {
+        const q = this.queues.get(c.queueId)
+        if (!q) return { ok: false, message: "Fila não encontrada" }
+        if (q.status === "running" || q.status === "paused") return { ok: false, message: "Cancele a fila antes de apagar" }
+        await this.deleteQueue(q.id)
+        return { ok: true, message: `Fila "${q.name}" apagada` }
+      }
+      case "clear_queues": {
+        const finished = [...this.queues.values()].filter((q) => q.status === "done" || q.status === "canceled")
+        const active = this.queues.size - finished.length
+        for (const q of finished) await this.deleteQueue(q.id)
+        return {
+          ok: true,
+          message: `${finished.length} fila(s) apagada(s)${active ? `; ${active} em andamento mantida(s)` : ""}`,
+          data: { deleted: finished.length, kept: active },
+        }
+      }
       case "start_devices": {
         this.desired = c.count
         await writeJsonAtomic(this.p.desired, { devices: c.count })
@@ -407,6 +439,16 @@ export class Runner {
         return { ok: true, message: "Atualizando catálogo" }
       }
     }
+  }
+
+  /** Apaga a fila e todos os arquivos das execuções dela (logs, prints, output.xml). */
+  private async deleteQueue(id: string): Promise<void> {
+    await (this.writeChains.get(id) ?? Promise.resolve()) // termina gravação pendente antes de apagar
+    this.queues.delete(id)
+    this.writeChains.delete(id)
+    await fsp.rm(this.p.queue(id), { force: true })
+    await fsp.rm(path.join(this.p.runs, id), { recursive: true, force: true })
+    this.log(`fila ${id} apagada`)
   }
 
   // ------------------------------------------------------------- celulares ---

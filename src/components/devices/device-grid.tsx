@@ -124,7 +124,9 @@ export function DeviceGrid() {
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Voltar</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => run({ type: "stop_all_devices" })}>Desligar</AlertDialogAction>
+                  <AlertDialogAction variant="destructive" onClick={() => run({ type: "stop_all_devices" })}>
+                    Desligar
+                  </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>

@@ -210,6 +210,24 @@ export function minTheoreticalSec(
   return rounds * avgSec
 }
 
+/** Status de caso que pode ser rodado de novo individualmente. */
+export const RETRYABLE_ITEM_STATUSES: ReadonlySet<ItemStatus> = new Set(["failed", "timeout", "infra_error", "config_error"])
+
+/**
+ * Coloca um caso que falhou de volta na fila (mesma fila, nova tentativa; o histórico é mantido).
+ * A fila volta a rodar. Retorna null se o caso não existe ou não está numa situação de falha.
+ */
+export function reopenItem(queue: Queue, itemIdValue: string): Queue | null {
+  const it = queue.items.find((i) => i.id === itemIdValue)
+  if (!it || !RETRYABLE_ITEM_STATUSES.has(it.status)) return null
+  return {
+    ...queue,
+    status: "running",
+    finishedAt: undefined,
+    items: queue.items.map((i) => (i.id === itemIdValue ? { ...i, status: "queued", infraRequeues: 0, failRetries: 0 } : i)),
+  }
+}
+
 /** Ids dos casos que devem entrar em "re-rodar falhas". */
 export function failedTestIds(queue: Queue): string[] {
   return queue.items.filter((i) => RERUNNABLE_STATUSES.has(i.status)).map((i) => i.testId)

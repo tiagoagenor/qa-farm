@@ -1,8 +1,9 @@
 "use client"
 
-import { ExternalLink } from "lucide-react"
+import { ExternalLink, RotateCcw } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
+import { RETRYABLE_ITEM_STATUSES } from "@/core/queue-logic"
 import type { Item } from "@/core/types"
 import { StatusBadge } from "@/components/panel/status-badge"
 import { Button } from "@/components/ui/button"
@@ -51,7 +52,17 @@ function ConsoleView({ queueId, itemId, n, live }: { queueId: string; itemId: st
   )
 }
 
-export function ItemSheet({ queueId, item, onOpenChange }: { queueId: string; item: Item | null; onOpenChange: (o: boolean) => void }) {
+export function ItemSheet({
+  queueId,
+  item,
+  onOpenChange,
+  onRetry,
+}: {
+  queueId: string
+  item: Item | null
+  onOpenChange: (o: boolean) => void
+  onRetry?: (itemId: string) => void
+}) {
   const [n, setN] = useState<number | null>(null)
   const attempts = item?.attempts ?? []
   const current = attempts.find((a) => a.n === n) ?? attempts[attempts.length - 1]
@@ -75,6 +86,11 @@ export function ItemSheet({ queueId, item, onOpenChange }: { queueId: string; it
               <div className="flex items-center gap-2">
                 <StatusBadge {...ITEM_STATUS[item.status]} />
                 <span className="text-muted-foreground text-sm">{attempts.length} tentativa(s)</span>
+                {onRetry && RETRYABLE_ITEM_STATUSES.has(item.status) && (
+                  <Button size="sm" variant="outline" className="ml-auto" onClick={() => onRetry(item.id)} data-testid="retry-item-sheet">
+                    <RotateCcw /> Rodar de novo
+                  </Button>
+                )}
               </div>
               {attempts.length === 0 ? (
                 <p className="text-muted-foreground text-sm">Ainda não começou.</p>

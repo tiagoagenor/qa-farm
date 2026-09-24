@@ -216,6 +216,7 @@ export function AppManager() {
                         <AlertDialogFooter>
                           <AlertDialogCancel>Voltar</AlertDialogCancel>
                           <AlertDialogAction
+                            variant="destructive"
                             onClick={async () => {
                               await sendCommand({ type: "delete_app", appId: a.id })
                               void reload()

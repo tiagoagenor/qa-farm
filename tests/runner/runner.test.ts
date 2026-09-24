@@ -483,6 +483,98 @@ describe("runner (modo fake)", () => {
     expect([devices?.devices.length, runner?.fake, runner?.catalogStatus]).toEqual([3, true, "ready"])
   })
 
+  it("rodar de novo um caso que falhou cria nova tentativa na mesma fila", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 2 })
+    const ids = await h.catalogIds((n) => ["CT_LOGIN_01-Caso-PASS", "CT_LOGIN_03-Caso-FAIL"].includes(n))
+    const created = await h.command({ type: "create_queue", input: queueInput(ids) })
+    const qid = created.data!.queueId as string
+    const first = await h.tickUntil(() => {
+      const live = liveQueue(qid)
+      return finished(live) ? live : undefined
+    })
+    const failedItem = first.items.find((i) => i.status === "failed")!
+
+    // Act
+    const res = await h.command({ type: "retry_item", queueId: qid, itemId: failedItem.id })
+    const again = await h.tickUntil(() => {
+      const live = liveQueue(qid)
+      return live && live.status === "done" && live.items.find((i) => i.id === failedItem.id)!.attempts.length === 2 ? live : undefined
+    })
+
+    // Assert
+    const it2 = again.items.find((i) => i.id === failedItem.id)!
+    expect([res.ok, it2.attempts.map((a) => a.status), again.items.find((i) => i.id !== failedItem.id)!.attempts.length]).toEqual([
+      true,
+      ["failed", "failed"],
+      1,
+    ])
+  })
+
+  it("rodar de novo um caso que passou é recusado", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+    const created = await h.command({ type: "create_queue", input: queueInput(ids) })
+    const qid = created.data!.queueId as string
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+
+    // Act
+    const res = await h.command({ type: "retry_item", queueId: qid, itemId: "i0001" })
+
+    // Assert
+    expect([res.ok, res.message]).toEqual([false, "Só é possível rodar de novo um caso que falhou"])
+  })
+
+  it("apagar fila concluída remove o arquivo e os logs das execuções", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+    const created = await h.command({ type: "create_queue", input: queueInput(ids) })
+    const qid = created.data!.queueId as string
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+
+    // Act
+    const res = await h.command({ type: "delete_queue", queueId: qid })
+
+    // Assert
+    const exists = (p: string) => fs.access(p).then(() => true, () => false)
+    expect([res.ok, liveQueue(qid), await exists(h.p.queue(qid)), await exists(path.join(h.p.runs, qid))]).toEqual([true, undefined, false, false])
+  })
+
+  it("fila em andamento não pode ser apagada", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 0 })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+    const created = await h.command({ type: "create_queue", input: queueInput(ids) })
+
+    // Act
+    const res = await h.command({ type: "delete_queue", queueId: created.data!.queueId as string })
+
+    // Assert
+    expect([res.ok, res.message]).toEqual([false, "Cancele a fila antes de apagar"])
+  })
+
+  it("limpar tudo apaga as filas terminadas e mantém as em andamento", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    const pass = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+    const done = await h.command({ type: "create_queue", input: queueInput(pass) })
+    await h.tickUntil(() => finished(liveQueue(done.data!.queueId as string)) || undefined)
+    const slow = await h.catalogIds((n) => n.includes("TIMEOUT"))
+    const active = await h.command({ type: "create_queue", input: queueInput(slow, { timeoutSec: 600 }) })
+
+    // Act
+    const res = await h.command({ type: "clear_queues" })
+
+    // Assert
+    expect([res.ok, res.data, h.runner.snapshotForTests().queues.map((q) => q.id)]).toEqual([
+      true,
+      { deleted: 1, kept: 1 },
+      [active.data!.queueId],
+    ])
+  })
+
   it("comando inválido é respondido com erro sem derrubar o runner", async () => {
     // Arrange
     h = await makeHarness()

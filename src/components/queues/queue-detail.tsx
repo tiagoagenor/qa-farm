@@ -28,9 +28,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { usePoll } from "@/hooks/use-poll"
 import { sendCommand } from "@/lib/client"
 import { durationBetween, formatDateTime, formatDuration, ITEM_STATUS, QUEUE_STATUS, runFileUrl } from "@/lib/format"
+import { RETRYABLE_ITEM_STATUSES } from "@/core/queue-logic"
 
 import { ItemSheet } from "./item-sheet"
-import { ResultBar } from "./queue-list"
+import { DeleteQueueButton, ResultBar } from "./queue-list"
 import type { QueueDetailDto } from "./types"
 
 const TABS: Array<{ value: string; label: string; match: (s: ItemStatus) => boolean }> = [
@@ -125,7 +126,9 @@ export function QueueDetail({ id }: { id: string }) {
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Voltar</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => run({ type: "cancel_queue", queueId: q.id })}>Cancelar fila</AlertDialogAction>
+                    <AlertDialogAction variant="destructive" onClick={() => run({ type: "cancel_queue", queueId: q.id })}>
+                      Cancelar fila
+                    </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
@@ -135,6 +138,7 @@ export function QueueDetail({ id }: { id: string }) {
                 <RotateCcw /> Re-rodar {failures} falha(s)
               </Button>
             )}
+            {!active && <DeleteQueueButton q={{ ...s, id: q.id, name: q.name }} variant="button" onDeleted={() => router.push("/filas")} />}
           </>
         }
       />
@@ -190,6 +194,7 @@ export function QueueDetail({ id }: { id: string }) {
                 <TableHead>Erro</TableHead>
                 <TableHead className="w-20">Print</TableHead>
                 <TableHead className="w-28">Logs</TableHead>
+                <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -254,6 +259,26 @@ export function QueueDetail({ id }: { id: string }) {
                         <span className="text-muted-foreground text-xs">—</span>
                       )}
                     </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      {RETRYABLE_ITEM_STATUSES.has(it.status) && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7"
+                              disabled={busy}
+                              aria-label={`Rodar ${it.name} de novo`}
+                              data-testid="retry-item"
+                              onClick={() => run({ type: "retry_item", queueId: q.id, itemId: it.id })}
+                            >
+                              <RotateCcw />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Rodar este caso de novo</TooltipContent>
+                        </Tooltip>
+                      )}
+                    </TableCell>
                   </TableRow>
                 )
               })}
@@ -261,7 +286,12 @@ export function QueueDetail({ id }: { id: string }) {
           </Table>
         </div>
       )}
-      <ItemSheet queueId={q.id} item={selectedItem} onOpenChange={(o) => !o && setOpenItem(null)} />
+      <ItemSheet
+        queueId={q.id}
+        item={selectedItem}
+        onOpenChange={(o) => !o && setOpenItem(null)}
+        onRetry={(itemId) => run({ type: "retry_item", queueId: q.id, itemId })}
+      />
     </div>
   )
 }
