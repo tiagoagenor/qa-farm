@@ -48,3 +48,21 @@ test("ativar o aparelho físico coloca ele no conjunto de testes e desativar tir
   await expect(card).toHaveAttribute("data-state", "external", { timeout: 30_000 })
   await expect(card.getByTestId("physical-switch")).not.toBeChecked()
 })
+
+test("emulador tem a chave usar nos testes: desligar tira do conjunto e ligar devolve", async ({ page }) => {
+  // Arrange
+  await ensureDevices(page.request, 2)
+  await page.goto("/celulares")
+  const card = page.locator('[data-testid="device-card"][data-serial="emulator-5556"]')
+  const toggle = card.getByTestId("emulator-switch")
+  await expect(toggle).toHaveAttribute("data-state", "checked")
+
+  // Act
+  await toggle.click()
+
+  // Assert
+  await expect(card).toContainText("Desativado — não recebe casos", { timeout: 15_000 })
+  await expect(toggle).toHaveAttribute("data-state", "unchecked")
+  await toggle.click()
+  await expect(card).toContainText("Recebe casos das filas", { timeout: 15_000 })
+})

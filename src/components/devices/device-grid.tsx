@@ -178,7 +178,7 @@ export function DeviceGrid() {
                 </div>
               </CardHeader>
               <CardContent className="grid gap-2 px-4 text-xs">
-                {d.kind === "physical" && (
+                {(d.kind === "physical" || d.kind === "emulator") && (
                   <div className="bg-muted/40 flex items-center justify-between gap-3 rounded-md border px-3 py-2">
                     <div className="grid gap-0.5">
                       <Label htmlFor={`use-${d.serial}`} className="text-xs font-medium">
@@ -191,10 +191,16 @@ export function DeviceGrid() {
                     <Switch
                       id={`use-${d.serial}`}
                       checked={!!d.enabled}
-                      disabled={busy || (d.enabled && d.state === "busy")}
-                      onCheckedChange={(v) => run({ type: "set_physical", serial: d.serial, enabled: v })}
+                      disabled={busy || (d.kind === "physical" && d.enabled && d.state === "busy")}
+                      onCheckedChange={(v) =>
+                        run(
+                          d.kind === "physical"
+                            ? { type: "set_physical", serial: d.serial, enabled: v }
+                            : { type: "set_emulator_enabled", serial: d.serial, enabled: v },
+                        )
+                      }
                       aria-label={`Usar ${d.serial} nos testes`}
-                      data-testid="physical-switch"
+                      data-testid={d.kind === "physical" ? "physical-switch" : "emulator-switch"}
                     />
                   </div>
                 )}

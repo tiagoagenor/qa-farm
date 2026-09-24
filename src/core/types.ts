@@ -159,7 +159,7 @@ export const DeviceSchema = z.object({
   currentItemId: z.string().optional(),
   currentTestName: z.string().optional(),
   qemuPid: z.number().int().optional(),
-  enabled: z.boolean().optional(), // aparelho físico ativado para receber casos
+  enabled: z.boolean().optional(), // "Usar nos testes": físico ativado / emulador no conjunto de testes
   note: z.string().optional(),
   updatedAt: z.string(),
 })
@@ -191,6 +191,9 @@ export const DesiredSchema = z.object({ devices: z.number().int().min(0).max(18)
 /** Aparelhos físicos ativados para testes: serial → índice fixo (portas do Appium/UiAutomator2). */
 export const PhysicalStateSchema = z.object({ enabled: z.record(z.string(), z.number().int()) })
 export type PhysicalState = z.infer<typeof PhysicalStateSchema>
+
+/** Emuladores tirados do conjunto de testes pela chave "Usar nos testes" (ligados, mas sem receber casos). */
+export const EmulatorsDisabledSchema = z.object({ disabled: z.array(z.string()) })
 export type Desired = z.infer<typeof DesiredSchema>
 
 // ------------------------------------------------------------ commands ---
@@ -219,6 +222,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("stop_all_devices") }),
   z.object({ type: z.literal("restart_device"), serial: z.string() }),
   z.object({ type: z.literal("set_physical"), serial: z.string().min(1).max(100), enabled: z.boolean() }),
+  z.object({ type: z.literal("set_emulator_enabled"), serial: z.string().min(1).max(100), enabled: z.boolean() }),
   z.object({ type: z.literal("restart_appiums") }),
   z.object({ type: z.literal("delete_app"), appId: z.string() }),
   z.object({ type: z.literal("refresh_catalog") }),

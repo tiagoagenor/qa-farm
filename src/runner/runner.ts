@@ -23,6 +23,7 @@ import {
   DesiredSchema,
   type Device,
   type DevicesState,
+  EmulatorsDisabledSchema,
   PhysicalStateSchema,
   type Queue,
   QueueSchema,
@@ -73,6 +74,7 @@ export class Runner {
   private installFailures = new Map<string, { versionCode: number; at: number; note: string }>()
   private prepared = new Set<string>() // celulares já configurados para testes (diálogos de erro desligados)
   private physical = new Map<string, number>() // aparelhos físicos ativados: serial → índice fixo
+  private disabledEmulators = new Set<string>() // emuladores ligados mas fora do conjunto de testes
   private maintenance = new Map<number, { since: string; reason: string }>()
   private farmOps: FarmOp[] = []
   private farmBusy = false
@@ -150,6 +152,7 @@ export class Runner {
     }
     this.desired = (await readJson(this.p.desired, DesiredSchema, { devices: 0 })).devices
     this.physical = new Map(Object.entries((await readJson(this.p.physical, PhysicalStateSchema, { enabled: {} })).enabled))
+    this.disabledEmulators = new Set((await readJson(this.p.emulatorsDisabled, EmulatorsDisabledSchema, { disabled: [] })).disabled)
     this.catalog = await readJson(this.p.catalog, CatalogSchema.nullable(), null)
     this.catalogStatus = this.catalog ? "ready" : "missing"
     await this.pickActiveApp()
@@ -451,6 +454,20 @@ export class Runner {
         this.lastDeviceRefresh = 0
         return { ok: true, message: `${c.serial} desativado: não recebe mais casos` }
       }
+      case "set_emulator_enabled": {
+        if (!/^emulator-\d+$/.test(c.serial)) return { ok: false, message: "Use esta opção só em emuladores" }
+        if (c.enabled) this.disabledEmulators.delete(c.serial)
+        else this.disabledEmulators.add(c.serial)
+        await writeJsonAtomic(this.p.emulatorsDisabled, { disabled: [...this.disabledEmulators].sort() })
+        this.lastDeviceRefresh = 0
+        const busyNow = [...this.running.values()].some((r) => r.serial === c.serial)
+        return {
+          ok: true,
+          message: c.enabled
+            ? `${c.serial} ativado: volta a receber casos`
+            : `${c.serial} desativado: ${busyNow ? "termina o caso atual e " : ""}não recebe mais casos`,
+        }
+      }
       case "restart_appiums": {
         if (this.running.size > 0) return { ok: false, message: "Há casos em execução. Pause ou cancele as filas antes." }
         await this.ad.appium.stopAll()
@@ -534,6 +551,7 @@ export class Runner {
       }
       const idx = isPhysical ? this.physical.get(d.serial)! : d.index!
       if (isPhysical) Object.assign(base, { index: idx, name: d.model ?? d.serial, enabled: true })
+      else base.enabled = !this.disabledEmulators.has(d.serial)
       const ra = busyBySerial.get(d.serial)
       if (!isPhysical && this.maintenance.has(idx)) {
         next.set(d.serial, { ...base, state: "maintenance", note: this.maintenance.get(idx)!.reason })
@@ -733,7 +751,7 @@ export class Runner {
   private async dispatch(): Promise<void> {
     await this.pickActiveApp()
     const free = [...this.devices.values()]
-      .filter((d) => (d.kind === "emulator" || d.enabled) && d.state === "ready" && d.index && ![...this.running.values()].some((r) => r.serial === d.serial))
+      .filter((d) => d.enabled !== false && (d.kind === "emulator" || d.enabled) && d.state === "ready" && d.index && ![...this.running.values()].some((r) => r.serial === d.serial))
       .map((d) => ({ serial: d.serial, index: d.index! }))
     if (free.length === 0) return
     const queues = [...this.queues.values()].filter((q) => q.appId === this.activeAppId)

@@ -241,6 +241,41 @@ describe("runner (modo fake)", () => {
     expect(d.appVersionCode).toBe(5528)
   })
 
+  it("emulador desativado fica pronto mas não recebe casos; ativado de novo volta a receber", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 2 })
+    await h.tickUntil(async () => (await h.readyCount()) >= 2 || undefined)
+    await h.command({ type: "set_emulator_enabled", serial: "emulator-5554", enabled: false })
+    const ids = await h.catalogIds((n) => ["CT_LOGIN_01-Caso-PASS", "CT_PIX_02-Caso-PASS", "CT_TED_02-Caso-PASS"].includes(n))
+
+    // Act
+    const created = await h.command({ type: "create_queue", input: { ...queueInput(ids), allowSameAccount: true } })
+    const q = await h.tickUntil(() => {
+      const live = liveQueue(created.data!.queueId as string)
+      return finished(live) ? live : undefined
+    }, 30_000)
+    const disabled = h.runner.snapshotForTests().devices.find((d) => d.serial === "emulator-5554")!
+    await h.command({ type: "set_emulator_enabled", serial: "emulator-5554", enabled: true })
+    await h.tickUntil(() => h.runner.snapshotForTests().devices.find((d) => d.serial === "emulator-5554")?.enabled || undefined)
+
+    // Assert
+    const serials = new Set(q.items.flatMap((i) => i.attempts.map((a) => a.serial)))
+    expect([[...serials], disabled.state, disabled.enabled]).toEqual([["emulator-5556"], "ready", false])
+  })
+
+  it("a escolha do emulador desativado sobrevive a um reinício do runner", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    await h.tickUntil(async () => (await h.readyCount()) >= 1 || undefined)
+
+    // Act
+    await h.command({ type: "set_emulator_enabled", serial: "emulator-5554", enabled: false })
+
+    // Assert
+    const saved = JSON.parse(await fs.readFile(h.p.emulatorsDisabled, "utf8"))
+    expect(saved).toEqual({ disabled: ["emulator-5554"] })
+  })
+
   it("desativar o aparelho físico devolve ele para externo", async () => {
     // Arrange
     h = await makeHarness({ emulators: 0, physical: ["FAKE-PHYSICAL-01"] })
