@@ -347,7 +347,7 @@ export function TestCatalog() {
         </SheetContent>
       </Sheet>
 
-      <CreateQueueDialog open={dialog} onOpenChange={setDialog} testIds={selectedValid} onCreated={() => setSelected(new Set())} />
+      <CreateQueueDialog open={dialog} onOpenChange={setDialog} entries={selectedEntries} onCreated={() => setSelected(new Set())} />
     </div>
   )
 }

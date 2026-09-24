@@ -3,34 +3,31 @@
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
-import type { AppMeta, Env } from "@/core/types"
+import type { AppMeta, CatalogEntry, Env } from "@/core/types"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { getJson, sendCommand } from "@/lib/client"
-
-function defaultName() {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, "0")
-  return `Fila ${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
+import { defaultQueueName } from "@/lib/queue-name"
 
 export function CreateQueueDialog({
   open,
   onOpenChange,
-  testIds,
+  entries,
   onCreated,
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
-  testIds: string[]
+  entries: CatalogEntry[]
   onCreated?: () => void
 }) {
+  const testIds = entries.map((e) => e.id)
   const router = useRouter()
   const [apps, setApps] = useState<AppMeta[] | null>(null)
-  const [name, setName] = useState(defaultName)
+  const [name, setName] = useState("")
+  const [nameTouched, setNameTouched] = useState(false)
   const [appId, setAppId] = useState("")
   const [env, setEnv] = useState<Env>("hml")
   const [timeoutMin, setTimeoutMin] = useState("15")
@@ -39,7 +36,7 @@ export function CreateQueueDialog({
 
   useEffect(() => {
     if (!open) return
-    setName(defaultName())
+    setNameTouched(false)
     getJson<{ apps: AppMeta[] }>("/api/apps")
       .then((r) => {
         setApps(r.apps)
@@ -47,6 +44,13 @@ export function CreateQueueDialog({
       })
       .catch(() => setApps([]))
   }, [open])
+
+  // nome sugerido: "{versão-build} {pasta}" ou "{versão-build} Fila {data}" — acompanha o APK escolhido
+  const app = apps?.find((a) => a.id === appId) ?? null
+  const suggested = defaultQueueName(app, entries)
+  useEffect(() => {
+    if (open && !nameTouched) setName(suggested)
+  }, [open, nameTouched, suggested])
 
   const timeoutSec = Math.round(Number(timeoutMin) * 60)
   const valid = name.trim() && appId && timeoutSec >= 10 && Number.isInteger(Number(retries))
@@ -75,7 +79,16 @@ export function CreateQueueDialog({
         <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="q-name">Nome</Label>
-            <Input id="q-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
+            <Input
+              id="q-name"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value)
+                setNameTouched(true)
+              }}
+              maxLength={120}
+              data-testid="queue-name"
+            />
           </div>
           <div className="grid gap-2">
             <Label>App</Label>
