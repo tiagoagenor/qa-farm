@@ -6,7 +6,7 @@ import path from "node:path"
 import type { Config } from "@/core/config"
 import { appiumGroup } from "@/core/parsers/adb-devices"
 
-import { isAlive, run } from "./exec"
+import { isAlive, run, sleep } from "./exec"
 
 /**
  * Servidores Appium compartilhados por grupo de celulares (padrão: 5 por servidor).
@@ -33,6 +33,7 @@ interface SessionInfo {
 
 export function realAppium(cfg: Config): AppiumPool {
   const procs = new Map<number, number>() // grupo → pid
+  const starting = new Map<number, Promise<void>>() // grupo → subida em andamento
   const group = (i: number) => appiumGroup(i, cfg.devicesPerAppium)
   const port = (i: number) => cfg.appiumBasePort + group(i)
   const url = (i: number) => `http://127.0.0.1:${port(i)}/wd/hub`
@@ -52,32 +53,46 @@ export function realAppium(cfg: Config): AppiumPool {
       return []
     }
   }
+  async function ready(i: number): Promise<boolean> {
+    try {
+      const r = await fetch(`${url(i)}/status`, { signal: AbortSignal.timeout(3000) })
+      const j = (await r.json()) as { value?: { ready?: boolean } }
+      return j.value?.ready === true
+    } catch {
+      return false
+    }
+  }
   return {
     url,
-    async isReady(i) {
-      try {
-        const r = await fetch(`${url(i)}/status`, { signal: AbortSignal.timeout(3000) })
-        const j = (await r.json()) as { value?: { ready?: boolean } }
-        return j.value?.ready === true
-      } catch {
-        return false
-      }
-    },
+    isReady: ready,
     async ensure(i) {
       const g = group(i)
-      const pid = procs.get(g)
-      if (pid && isAlive(pid)) return
-      const logFile = path.join(cfg.dataDir, "logs", `appium-g${g}.log`)
-      await fsp.mkdir(path.dirname(logFile), { recursive: true })
-      const out = fs.openSync(logFile, "a")
-      const child = spawn(
-        cfg.appiumBin,
-        ["--address", "127.0.0.1", "--port", String(port(i)), "--base-path", "/wd/hub", "--relaxed-security", "--log-no-colors", "--log-timestamp"],
-        { stdio: ["ignore", out, out], env, detached: true },
-      )
-      fs.closeSync(out)
-      child.unref()
-      if (child.pid) procs.set(g, child.pid)
+      // um único "subir Appium" por grupo em andamento (os 5 celulares do grupo chamam ao mesmo tempo)
+      const pending = starting.get(g)
+      if (pending) return pending
+      const task = (async () => {
+        const pid = procs.get(g)
+        if (pid && isAlive(pid)) return
+        if (await ready(i)) return // já há um Appium servindo esta porta
+        const logFile = path.join(cfg.dataDir, "logs", `appium-g${g}.log`)
+        await fsp.mkdir(path.dirname(logFile), { recursive: true })
+        const out = fs.openSync(logFile, "a")
+        const child = spawn(
+          cfg.appiumBin,
+          ["--address", "127.0.0.1", "--port", String(port(i)), "--base-path", "/wd/hub", "--relaxed-security", "--log-no-colors", "--log-timestamp"],
+          { stdio: ["ignore", out, out], env, detached: true },
+        )
+        fs.closeSync(out)
+        child.unref()
+        if (child.pid) procs.set(g, child.pid)
+        // espera o servidor responder (ou desistir) antes de liberar o próximo ensure do grupo
+        for (let k = 0; k < 40 && !(await ready(i)); k++) {
+          if (child.pid && !isAlive(child.pid)) break
+          await sleep(250)
+        }
+      })().finally(() => starting.delete(g))
+      starting.set(g, task)
+      return task
     },
     async cleanupSessions(i, serial) {
       let removed = 0
