@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot generator="Robot 6.1.1 (Python 3.14.4 on linux)" generated="20260923 22:13:47.300" rpa="false" schemaversion="4">
+<suite id="s1" name="Exemplo" source="/snapshot/scenarios/exemplo/exemplo.robot">
+<test id="s1-t1" name="CT_EXEMPLO_09-Abrir-tela-SMOKE" line="60">
+<kw name="Iniciar o ${LOC}" type="SETUP">
+<status status="PASS" starttime="20260923 22:13:47.385" endtime="20260923 22:13:55.100"/>
+</kw>
+<kw name="Dado que abro a tela">
+<status status="PASS" starttime="20260923 22:13:55.100" endtime="20260923 22:14:00.000"/>
+</kw>
+<kw name="Fechar o aplicativo" type="TEARDOWN">
+<status status="PASS" starttime="20260923 22:14:00.000" endtime="20260923 22:14:03.385"/>
+</kw>
+<tag>smoke_exemplo</tag>
+<status status="PASS" starttime="20260923 22:13:47.384" endtime="20260923 22:14:03.385"/>
+</test>
+<status status="PASS" starttime="20260923 22:13:47.300" endtime="20260923 22:14:03.390"/>
+</suite>
+<statistics>
+<total>
+<stat pass="1" fail="0" skip="0">All Tests</stat>
+</total>
+</statistics>
+<errors>
+</errors>
+</robot>

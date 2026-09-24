@@ -39,3 +39,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+!.env.example
+
+# qa-farm
+/dist/
+/.qafarm-dev/
+/test-results/
+/playwright-report/
+/.venv-dev/
+__pycache__/
+.pytest_cache/
+*.apk

@@ -1,0 +1,3 @@
+[ ERROR ] Suite 'Exemplo' contains no tests matching name 'Exemplo.CT_NAO_EXISTE'.
+
+Try --help for usage information.

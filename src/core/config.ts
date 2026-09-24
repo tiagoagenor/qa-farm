@@ -1,0 +1,59 @@
+import os from "node:os"
+import path from "node:path"
+
+export interface Config {
+  repoRoot: string
+  dataDir: string
+  fake: boolean
+  fakeScenario?: string
+  fakeSpeed: number
+  password: string
+  secret: string
+  robotProject: string
+  robotBin: string
+  pythonBin: string
+  aapt2: string
+  appiumBin: string
+  adbBin: string
+  farmHome: string
+  sdkRoot: string
+  javaHome: string
+  appiumBasePort: number
+  maxDevices: number
+  installConcurrency: number
+}
+
+function num(v: string | undefined, fallback: number): number {
+  const n = Number(v)
+  return Number.isFinite(n) && v !== undefined && v !== "" ? n : fallback
+}
+
+/** Lê a configuração do ambiente (process.env). Sem efeitos colaterais. */
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const home = env.HOME ?? os.homedir()
+  const repoRoot = env.QAFARM_REPO_ROOT ?? process.cwd()
+  const sdkRoot = env.ANDROID_SDK_ROOT ?? path.join(home, "android-sdk")
+  const robotProject = env.QAFARM_ROBOT_PROJECT ?? path.join(home, "www/QA_Automacao_APP")
+  const dataDir = path.resolve(repoRoot, env.QAFARM_DATA_DIR ?? path.join(home, "qa-farm-data"))
+  return {
+    repoRoot,
+    dataDir,
+    fake: env.QAFARM_FAKE === "1",
+    fakeScenario: env.QAFARM_FAKE_SCENARIO,
+    fakeSpeed: num(env.QAFARM_FAKE_SPEED, 1),
+    password: env.QAFARM_PASSWORD ?? "",
+    secret: env.QAFARM_SECRET ?? "",
+    robotProject,
+    robotBin: env.QAFARM_ROBOT_BIN ?? path.join(robotProject, ".venv/bin/robot"),
+    pythonBin: env.QAFARM_PYTHON_BIN ?? path.join(robotProject, ".venv/bin/python"),
+    aapt2: env.QAFARM_AAPT2 ?? path.join(sdkRoot, "build-tools/37.0.0/aapt2"),
+    appiumBin: env.QAFARM_APPIUM_BIN ?? path.join(home, "node/bin/appium"),
+    adbBin: env.QAFARM_ADB_BIN ?? path.join(sdkRoot, "platform-tools/adb"),
+    farmHome: env.QAFARM_FARM_HOME ?? path.join(home, "android-farm"),
+    sdkRoot,
+    javaHome: env.JAVA_HOME ?? path.join(home, "jdk"),
+    appiumBasePort: num(env.QAFARM_APPIUM_BASE_PORT, 4800),
+    maxDevices: num(env.QAFARM_MAX_DEVICES, 18),
+    installConcurrency: num(env.QAFARM_INSTALL_CONCURRENCY, 3),
+  }
+}

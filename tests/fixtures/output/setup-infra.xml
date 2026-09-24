@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot generator="Robot 6.1.1 (Python 3.14.4 on linux)" generated="20260923 23:00:00.000" rpa="false" schemaversion="4">
+<suite id="s1" name="Exemplo" source="/snapshot/scenarios/exemplo/exemplo.robot">
+<test id="s1-t1" name="CT_EXEMPLO_02-Outro" line="20">
+<kw name="Iniciar o ${LOC}" type="SETUP">
+<status status="FAIL" starttime="20260923 23:00:00.100" endtime="20260923 23:00:30.000">WebDriverException: Message: An unknown server-side error occurred while processing the command. Original error: Could not start a new session. Response code 500.</status>
+</kw>
+<tag>regressivo_exemplo</tag>
+<status status="FAIL" starttime="20260923 23:00:00.050" endtime="20260923 23:00:31.000">Setup failed:
+WebDriverException: Message: An unknown server-side error occurred while processing the command. Original error: Could not start a new session. Response code 500.
+
+Also teardown failed:
+No application is open</status>
+</test>
+<status status="FAIL" starttime="20260923 23:00:00.000" endtime="20260923 23:00:31.100"/>
+</suite>
+<statistics>
+<total>
+<stat pass="0" fail="1" skip="0">All Tests</stat>
+</total>
+</statistics>
+<errors>
+</errors>
+</robot>

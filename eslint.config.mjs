@@ -18,6 +18,12 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      ".venv-dev/**",
+      "dist/**",
+      ".qafarm-dev/**",
+      "test-results/**",
+      "playwright-report/**",
+      "src/components/ui/**",
     ],
   },
 ];

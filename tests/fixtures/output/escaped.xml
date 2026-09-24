@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot generator="Robot 6.1.1 (Python 3.14.4 on linux)" generated="20260923 23:00:00.000" rpa="false" schemaversion="4">
+<suite id="s1" name="Exemplo" source="/snapshot/scenarios/exemplo/exemplo.robot">
+<test id="s1-t1" name="CT_EXEMPLO_03" line="30">
+<status status="FAIL" starttime="20260923 23:00:00.000" endtime="20260923 23:00:02.500">Text &apos;accessibility_id=Não foi possível &amp; &quot;x&quot; &lt;y&gt;&apos; did not appear</status>
+</test>
+<status status="FAIL" starttime="20260923 23:00:00.000" endtime="20260923 23:00:02.600"/>
+</suite>
+</robot>

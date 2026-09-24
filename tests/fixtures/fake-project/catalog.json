@@ -1,0 +1,827 @@
+{
+ "generatedAt": "2026-09-24T00:00:00Z",
+ "snapshotHash": "fake",
+ "total": 53,
+ "entries": [
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_01-Caso-PASS",
+   "name": "CT_LOGIN_01-Caso-PASS",
+   "fileLongName": "Login.CT_LOGIN_01-Caso-PASS",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 9,
+   "tags": [
+    "regressivo_login_hml"
+   ],
+   "accounts": [
+    "usuario_login_b"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_02-Caso-PASS",
+   "name": "CT_LOGIN_02-Caso-PASS",
+   "fileLongName": "Login.CT_LOGIN_02-Caso-PASS",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 13,
+   "tags": [
+    "regressivo_login_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_03-Caso-FAIL",
+   "name": "CT_LOGIN_03-Caso-FAIL",
+   "fileLongName": "Login.CT_LOGIN_03-Caso-FAIL",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 17,
+   "tags": [
+    "regressivo_login_hml"
+   ],
+   "accounts": [
+    "usuario_login_a"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_04-Caso-PASS",
+   "name": "CT_LOGIN_04-Caso-PASS",
+   "fileLongName": "Login.CT_LOGIN_04-Caso-PASS",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 21,
+   "tags": [
+    "regressivo_login_hml",
+    "smoke_login_preprod"
+   ],
+   "accounts": [
+    "usuario_login_b"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_05-Caso-SLOW-PASS",
+   "name": "CT_LOGIN_05-Caso-SLOW-PASS",
+   "fileLongName": "Login.CT_LOGIN_05-Caso-SLOW-PASS",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 25,
+   "tags": [
+    "regressivo_login_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_06-Caso-PASS",
+   "name": "CT_LOGIN_06-Caso-PASS",
+   "fileLongName": "Login.CT_LOGIN_06-Caso-PASS",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 29,
+   "tags": [
+    "regressivo_login_hml"
+   ],
+   "accounts": [
+    "usuario_login_a"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_07-Caso-INFRA",
+   "name": "CT_LOGIN_07-Caso-INFRA",
+   "fileLongName": "Login.CT_LOGIN_07-Caso-INFRA",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 33,
+   "tags": [
+    "regressivo_login_hml"
+   ],
+   "accounts": [
+    "usuario_login_b"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_08-Caso-PASS",
+   "name": "CT_LOGIN_08-Caso-PASS",
+   "fileLongName": "Login.CT_LOGIN_08-Caso-PASS",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 37,
+   "tags": [
+    "regressivo_login_hml",
+    "smoke_login_preprod"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_09-Caso-PASS",
+   "name": "CT_LOGIN_09-Caso-PASS",
+   "fileLongName": "Login.CT_LOGIN_09-Caso-PASS",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 41,
+   "tags": [
+    "regressivo_login_hml"
+   ],
+   "accounts": [
+    "usuario_login_a"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_10-Caso-PASS",
+   "name": "CT_LOGIN_10-Caso-PASS",
+   "fileLongName": "Login.CT_LOGIN_10-Caso-PASS",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 45,
+   "tags": [
+    "regressivo_login_hml"
+   ],
+   "accounts": [
+    "usuario_login_b"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/pix/pix.robot::CT_PIX_01-Caso-FAIL",
+   "name": "CT_PIX_01-Caso-FAIL",
+   "fileLongName": "Pix.CT_PIX_01-Caso-FAIL",
+   "suite": "Pix",
+   "file": "scenarios/pix/pix.robot",
+   "folder": "scenarios/pix",
+   "line": 9,
+   "tags": [
+    "regressivo_pix_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/pix/pix.robot::CT_PIX_02-Caso-PASS",
+   "name": "CT_PIX_02-Caso-PASS",
+   "fileLongName": "Pix.CT_PIX_02-Caso-PASS",
+   "suite": "Pix",
+   "file": "scenarios/pix/pix.robot",
+   "folder": "scenarios/pix",
+   "line": 13,
+   "tags": [
+    "regressivo_pix_hml"
+   ],
+   "accounts": [
+    "usuario_pix"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/pix/pix.robot::CT_PIX_03-Caso-SLOW-PASS",
+   "name": "CT_PIX_03-Caso-SLOW-PASS",
+   "fileLongName": "Pix.CT_PIX_03-Caso-SLOW-PASS",
+   "suite": "Pix",
+   "file": "scenarios/pix/pix.robot",
+   "folder": "scenarios/pix",
+   "line": 17,
+   "tags": [
+    "regressivo_pix_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/pix/pix.robot::CT_PIX_04-Caso-PASS",
+   "name": "CT_PIX_04-Caso-PASS",
+   "fileLongName": "Pix.CT_PIX_04-Caso-PASS",
+   "suite": "Pix",
+   "file": "scenarios/pix/pix.robot",
+   "folder": "scenarios/pix",
+   "line": 21,
+   "tags": [
+    "regressivo_pix_hml",
+    "smoke_pix_preprod"
+   ],
+   "accounts": [
+    "usuario_pix"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/pix/pix.robot::CT_PIX_05-Caso-INFRA",
+   "name": "CT_PIX_05-Caso-INFRA",
+   "fileLongName": "Pix.CT_PIX_05-Caso-INFRA",
+   "suite": "Pix",
+   "file": "scenarios/pix/pix.robot",
+   "folder": "scenarios/pix",
+   "line": 25,
+   "tags": [
+    "regressivo_pix_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/pix/pix.robot::CT_PIX_06-Caso-PASS",
+   "name": "CT_PIX_06-Caso-PASS",
+   "fileLongName": "Pix.CT_PIX_06-Caso-PASS",
+   "suite": "Pix",
+   "file": "scenarios/pix/pix.robot",
+   "folder": "scenarios/pix",
+   "line": 29,
+   "tags": [
+    "regressivo_pix_hml"
+   ],
+   "accounts": [
+    "usuario_pix"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/pix/pix.robot::CT_PIX_07-Caso-PASS",
+   "name": "CT_PIX_07-Caso-PASS",
+   "fileLongName": "Pix.CT_PIX_07-Caso-PASS",
+   "suite": "Pix",
+   "file": "scenarios/pix/pix.robot",
+   "folder": "scenarios/pix",
+   "line": 33,
+   "tags": [
+    "regressivo_pix_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/pix/pix.robot::CT_PIX_08-Caso-PASS",
+   "name": "CT_PIX_08-Caso-PASS",
+   "fileLongName": "Pix.CT_PIX_08-Caso-PASS",
+   "suite": "Pix",
+   "file": "scenarios/pix/pix.robot",
+   "folder": "scenarios/pix",
+   "line": 37,
+   "tags": [
+    "regressivo_pix_hml",
+    "smoke_pix_preprod"
+   ],
+   "accounts": [
+    "usuario_pix"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/pix/pix.robot::CT_PIX_09-Caso-FAIL",
+   "name": "CT_PIX_09-Caso-FAIL",
+   "fileLongName": "Pix.CT_PIX_09-Caso-FAIL",
+   "suite": "Pix",
+   "file": "scenarios/pix/pix.robot",
+   "folder": "scenarios/pix",
+   "line": 41,
+   "tags": [
+    "regressivo_pix_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/pix/pix.robot::CT_PIX_10-Caso-PASS",
+   "name": "CT_PIX_10-Caso-PASS",
+   "fileLongName": "Pix.CT_PIX_10-Caso-PASS",
+   "suite": "Pix",
+   "file": "scenarios/pix/pix.robot",
+   "folder": "scenarios/pix",
+   "line": 45,
+   "tags": [
+    "regressivo_pix_hml"
+   ],
+   "accounts": [
+    "usuario_pix"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/ted/ted.robot::CT_TED_01-Caso-SLOW-PASS",
+   "name": "CT_TED_01-Caso-SLOW-PASS",
+   "fileLongName": "Ted.CT_TED_01-Caso-SLOW-PASS",
+   "suite": "Ted",
+   "file": "scenarios/ted/ted.robot",
+   "folder": "scenarios/ted",
+   "line": 9,
+   "tags": [
+    "regressivo_ted_hml"
+   ],
+   "accounts": [
+    "usuario_ted"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/ted/ted.robot::CT_TED_02-Caso-PASS",
+   "name": "CT_TED_02-Caso-PASS",
+   "fileLongName": "Ted.CT_TED_02-Caso-PASS",
+   "suite": "Ted",
+   "file": "scenarios/ted/ted.robot",
+   "folder": "scenarios/ted",
+   "line": 13,
+   "tags": [
+    "regressivo_ted_hml"
+   ],
+   "accounts": [
+    "usuario_ted"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/ted/ted.robot::CT_TED_03-Caso-INFRA",
+   "name": "CT_TED_03-Caso-INFRA",
+   "fileLongName": "Ted.CT_TED_03-Caso-INFRA",
+   "suite": "Ted",
+   "file": "scenarios/ted/ted.robot",
+   "folder": "scenarios/ted",
+   "line": 17,
+   "tags": [
+    "regressivo_ted_hml"
+   ],
+   "accounts": [
+    "usuario_ted"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/ted/ted.robot::CT_TED_04-Caso-PASS",
+   "name": "CT_TED_04-Caso-PASS",
+   "fileLongName": "Ted.CT_TED_04-Caso-PASS",
+   "suite": "Ted",
+   "file": "scenarios/ted/ted.robot",
+   "folder": "scenarios/ted",
+   "line": 21,
+   "tags": [
+    "regressivo_ted_hml",
+    "smoke_ted_preprod"
+   ],
+   "accounts": [
+    "usuario_ted"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/ted/ted.robot::CT_TED_05-Caso-PASS",
+   "name": "CT_TED_05-Caso-PASS",
+   "fileLongName": "Ted.CT_TED_05-Caso-PASS",
+   "suite": "Ted",
+   "file": "scenarios/ted/ted.robot",
+   "folder": "scenarios/ted",
+   "line": 25,
+   "tags": [
+    "regressivo_ted_hml"
+   ],
+   "accounts": [
+    "usuario_ted"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/ted/ted.robot::CT_TED_06-Caso-PASS",
+   "name": "CT_TED_06-Caso-PASS",
+   "fileLongName": "Ted.CT_TED_06-Caso-PASS",
+   "suite": "Ted",
+   "file": "scenarios/ted/ted.robot",
+   "folder": "scenarios/ted",
+   "line": 29,
+   "tags": [
+    "regressivo_ted_hml"
+   ],
+   "accounts": [
+    "usuario_ted"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/ted/ted.robot::CT_TED_07-Caso-FAIL",
+   "name": "CT_TED_07-Caso-FAIL",
+   "fileLongName": "Ted.CT_TED_07-Caso-FAIL",
+   "suite": "Ted",
+   "file": "scenarios/ted/ted.robot",
+   "folder": "scenarios/ted",
+   "line": 33,
+   "tags": [
+    "regressivo_ted_hml"
+   ],
+   "accounts": [
+    "usuario_ted"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/ted/ted.robot::CT_TED_08-Caso-PASS",
+   "name": "CT_TED_08-Caso-PASS",
+   "fileLongName": "Ted.CT_TED_08-Caso-PASS",
+   "suite": "Ted",
+   "file": "scenarios/ted/ted.robot",
+   "folder": "scenarios/ted",
+   "line": 37,
+   "tags": [
+    "regressivo_ted_hml",
+    "smoke_ted_preprod"
+   ],
+   "accounts": [
+    "usuario_ted"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/ted/ted.robot::CT_TED_09-Caso-SLOW-PASS",
+   "name": "CT_TED_09-Caso-SLOW-PASS",
+   "fileLongName": "Ted.CT_TED_09-Caso-SLOW-PASS",
+   "suite": "Ted",
+   "file": "scenarios/ted/ted.robot",
+   "folder": "scenarios/ted",
+   "line": 41,
+   "tags": [
+    "regressivo_ted_hml"
+   ],
+   "accounts": [
+    "usuario_ted"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/ted/ted.robot::CT_TED_10-Caso-PASS",
+   "name": "CT_TED_10-Caso-PASS",
+   "fileLongName": "Ted.CT_TED_10-Caso-PASS",
+   "suite": "Ted",
+   "file": "scenarios/ted/ted.robot",
+   "folder": "scenarios/ted",
+   "line": 45,
+   "tags": [
+    "regressivo_ted_hml"
+   ],
+   "accounts": [
+    "usuario_ted"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/cartoes/cartoes.robot::CT_CARTOES_01-Caso-INFRA",
+   "name": "CT_CARTOES_01-Caso-INFRA",
+   "fileLongName": "Cartoes.CT_CARTOES_01-Caso-INFRA",
+   "suite": "Cartoes",
+   "file": "scenarios/cartoes/cartoes.robot",
+   "folder": "scenarios/cartoes",
+   "line": 9,
+   "tags": [
+    "regressivo_cartoes_hml"
+   ],
+   "accounts": [
+    "usuario_cartao"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/cartoes/cartoes.robot::CT_CARTOES_02-Caso-PASS",
+   "name": "CT_CARTOES_02-Caso-PASS",
+   "fileLongName": "Cartoes.CT_CARTOES_02-Caso-PASS",
+   "suite": "Cartoes",
+   "file": "scenarios/cartoes/cartoes.robot",
+   "folder": "scenarios/cartoes",
+   "line": 13,
+   "tags": [
+    "regressivo_cartoes_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/cartoes/cartoes.robot::CT_CARTOES_03-Caso-PASS",
+   "name": "CT_CARTOES_03-Caso-PASS",
+   "fileLongName": "Cartoes.CT_CARTOES_03-Caso-PASS",
+   "suite": "Cartoes",
+   "file": "scenarios/cartoes/cartoes.robot",
+   "folder": "scenarios/cartoes",
+   "line": 17,
+   "tags": [
+    "regressivo_cartoes_hml"
+   ],
+   "accounts": [
+    "usuario_cartao"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/cartoes/cartoes.robot::CT_CARTOES_04-Caso-PASS",
+   "name": "CT_CARTOES_04-Caso-PASS",
+   "fileLongName": "Cartoes.CT_CARTOES_04-Caso-PASS",
+   "suite": "Cartoes",
+   "file": "scenarios/cartoes/cartoes.robot",
+   "folder": "scenarios/cartoes",
+   "line": 21,
+   "tags": [
+    "regressivo_cartoes_hml",
+    "smoke_cartoes_preprod"
+   ],
+   "accounts": [
+    "usuario_cartao"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/cartoes/cartoes.robot::CT_CARTOES_05-Caso-FAIL",
+   "name": "CT_CARTOES_05-Caso-FAIL",
+   "fileLongName": "Cartoes.CT_CARTOES_05-Caso-FAIL",
+   "suite": "Cartoes",
+   "file": "scenarios/cartoes/cartoes.robot",
+   "folder": "scenarios/cartoes",
+   "line": 25,
+   "tags": [
+    "regressivo_cartoes_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/cartoes/cartoes.robot::CT_CARTOES_06-Caso-PASS",
+   "name": "CT_CARTOES_06-Caso-PASS",
+   "fileLongName": "Cartoes.CT_CARTOES_06-Caso-PASS",
+   "suite": "Cartoes",
+   "file": "scenarios/cartoes/cartoes.robot",
+   "folder": "scenarios/cartoes",
+   "line": 29,
+   "tags": [
+    "regressivo_cartoes_hml"
+   ],
+   "accounts": [
+    "usuario_cartao"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/cartoes/cartoes.robot::CT_CARTOES_07-Caso-SLOW-PASS",
+   "name": "CT_CARTOES_07-Caso-SLOW-PASS",
+   "fileLongName": "Cartoes.CT_CARTOES_07-Caso-SLOW-PASS",
+   "suite": "Cartoes",
+   "file": "scenarios/cartoes/cartoes.robot",
+   "folder": "scenarios/cartoes",
+   "line": 33,
+   "tags": [
+    "regressivo_cartoes_hml"
+   ],
+   "accounts": [
+    "usuario_cartao"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/cartoes/cartoes.robot::CT_CARTOES_08-Caso-PASS",
+   "name": "CT_CARTOES_08-Caso-PASS",
+   "fileLongName": "Cartoes.CT_CARTOES_08-Caso-PASS",
+   "suite": "Cartoes",
+   "file": "scenarios/cartoes/cartoes.robot",
+   "folder": "scenarios/cartoes",
+   "line": 37,
+   "tags": [
+    "regressivo_cartoes_hml",
+    "smoke_cartoes_preprod"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/cartoes/cartoes.robot::CT_CARTOES_09-Caso-INFRA",
+   "name": "CT_CARTOES_09-Caso-INFRA",
+   "fileLongName": "Cartoes.CT_CARTOES_09-Caso-INFRA",
+   "suite": "Cartoes",
+   "file": "scenarios/cartoes/cartoes.robot",
+   "folder": "scenarios/cartoes",
+   "line": 41,
+   "tags": [
+    "regressivo_cartoes_hml"
+   ],
+   "accounts": [
+    "usuario_cartao"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/cartoes/cartoes.robot::CT_CARTOES_10-Caso-PASS",
+   "name": "CT_CARTOES_10-Caso-PASS",
+   "fileLongName": "Cartoes.CT_CARTOES_10-Caso-PASS",
+   "suite": "Cartoes",
+   "file": "scenarios/cartoes/cartoes.robot",
+   "folder": "scenarios/cartoes",
+   "line": 45,
+   "tags": [
+    "regressivo_cartoes_hml"
+   ],
+   "accounts": [
+    "usuario_cartao"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/investimentos/investimentos.robot::CT_INVESTIMENTOS_01-Caso-PASS",
+   "name": "CT_INVESTIMENTOS_01-Caso-PASS",
+   "fileLongName": "Investimentos.CT_INVESTIMENTOS_01-Caso-PASS",
+   "suite": "Investimentos",
+   "file": "scenarios/investimentos/investimentos.robot",
+   "folder": "scenarios/investimentos",
+   "line": 9,
+   "tags": [
+    "regressivo_investimentos_hml"
+   ],
+   "accounts": [
+    "usuario_invest"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/investimentos/investimentos.robot::CT_INVESTIMENTOS_02-Caso-PASS",
+   "name": "CT_INVESTIMENTOS_02-Caso-PASS",
+   "fileLongName": "Investimentos.CT_INVESTIMENTOS_02-Caso-PASS",
+   "suite": "Investimentos",
+   "file": "scenarios/investimentos/investimentos.robot",
+   "folder": "scenarios/investimentos",
+   "line": 13,
+   "tags": [
+    "regressivo_investimentos_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/investimentos/investimentos.robot::CT_INVESTIMENTOS_03-Caso-FAIL",
+   "name": "CT_INVESTIMENTOS_03-Caso-FAIL",
+   "fileLongName": "Investimentos.CT_INVESTIMENTOS_03-Caso-FAIL",
+   "suite": "Investimentos",
+   "file": "scenarios/investimentos/investimentos.robot",
+   "folder": "scenarios/investimentos",
+   "line": 17,
+   "tags": [
+    "regressivo_investimentos_hml"
+   ],
+   "accounts": [
+    "usuario_invest"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/investimentos/investimentos.robot::CT_INVESTIMENTOS_04-Caso-PASS",
+   "name": "CT_INVESTIMENTOS_04-Caso-PASS",
+   "fileLongName": "Investimentos.CT_INVESTIMENTOS_04-Caso-PASS",
+   "suite": "Investimentos",
+   "file": "scenarios/investimentos/investimentos.robot",
+   "folder": "scenarios/investimentos",
+   "line": 21,
+   "tags": [
+    "regressivo_investimentos_hml",
+    "smoke_investimentos_preprod"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/investimentos/investimentos.robot::CT_INVESTIMENTOS_05-Caso-SLOW-PASS",
+   "name": "CT_INVESTIMENTOS_05-Caso-SLOW-PASS",
+   "fileLongName": "Investimentos.CT_INVESTIMENTOS_05-Caso-SLOW-PASS",
+   "suite": "Investimentos",
+   "file": "scenarios/investimentos/investimentos.robot",
+   "folder": "scenarios/investimentos",
+   "line": 25,
+   "tags": [
+    "regressivo_investimentos_hml"
+   ],
+   "accounts": [
+    "usuario_invest"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/investimentos/investimentos.robot::CT_INVESTIMENTOS_06-Caso-PASS",
+   "name": "CT_INVESTIMENTOS_06-Caso-PASS",
+   "fileLongName": "Investimentos.CT_INVESTIMENTOS_06-Caso-PASS",
+   "suite": "Investimentos",
+   "file": "scenarios/investimentos/investimentos.robot",
+   "folder": "scenarios/investimentos",
+   "line": 29,
+   "tags": [
+    "regressivo_investimentos_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/investimentos/investimentos.robot::CT_INVESTIMENTOS_07-Caso-INFRA",
+   "name": "CT_INVESTIMENTOS_07-Caso-INFRA",
+   "fileLongName": "Investimentos.CT_INVESTIMENTOS_07-Caso-INFRA",
+   "suite": "Investimentos",
+   "file": "scenarios/investimentos/investimentos.robot",
+   "folder": "scenarios/investimentos",
+   "line": 33,
+   "tags": [
+    "regressivo_investimentos_hml"
+   ],
+   "accounts": [
+    "usuario_invest"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/investimentos/investimentos.robot::CT_INVESTIMENTOS_08-Caso-PASS",
+   "name": "CT_INVESTIMENTOS_08-Caso-PASS",
+   "fileLongName": "Investimentos.CT_INVESTIMENTOS_08-Caso-PASS",
+   "suite": "Investimentos",
+   "file": "scenarios/investimentos/investimentos.robot",
+   "folder": "scenarios/investimentos",
+   "line": 37,
+   "tags": [
+    "regressivo_investimentos_hml",
+    "smoke_investimentos_preprod"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/investimentos/investimentos.robot::CT_INVESTIMENTOS_09-Caso-PASS",
+   "name": "CT_INVESTIMENTOS_09-Caso-PASS",
+   "fileLongName": "Investimentos.CT_INVESTIMENTOS_09-Caso-PASS",
+   "suite": "Investimentos",
+   "file": "scenarios/investimentos/investimentos.robot",
+   "folder": "scenarios/investimentos",
+   "line": 41,
+   "tags": [
+    "regressivo_investimentos_hml"
+   ],
+   "accounts": [
+    "usuario_invest"
+   ],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/investimentos/investimentos.robot::CT_INVESTIMENTOS_10-Caso-PASS",
+   "name": "CT_INVESTIMENTOS_10-Caso-PASS",
+   "fileLongName": "Investimentos.CT_INVESTIMENTOS_10-Caso-PASS",
+   "suite": "Investimentos",
+   "file": "scenarios/investimentos/investimentos.robot",
+   "folder": "scenarios/investimentos",
+   "line": 45,
+   "tags": [
+    "regressivo_investimentos_hml"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_99-Caso-TIMEOUT",
+   "name": "CT_LOGIN_99-Caso-TIMEOUT",
+   "fileLongName": "Login.CT_LOGIN_99-Caso-TIMEOUT",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 200,
+   "tags": [
+    "especial"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/login/login.robot::CT_LOGIN_98-Caso-NOMATCH",
+   "name": "CT_LOGIN_98-Caso-NOMATCH",
+   "fileLongName": "Login.CT_LOGIN_98-Caso-NOMATCH",
+   "suite": "Login",
+   "file": "scenarios/login/login.robot",
+   "folder": "scenarios/login",
+   "line": 210,
+   "tags": [
+    "especial"
+   ],
+   "accounts": [],
+   "duplicate": false
+  },
+  {
+   "id": "scenarios/pix/pix.robot::CT_PIX_77-Caso (ç+$) PASS",
+   "name": "CT_PIX_77-Caso (ç+$) PASS",
+   "fileLongName": "Pix.CT_PIX_77-Caso (ç+$) PASS",
+   "suite": "Pix",
+   "file": "scenarios/pix/pix.robot",
+   "folder": "scenarios/pix",
+   "line": 220,
+   "tags": [
+    "especial"
+   ],
+   "accounts": [],
+   "duplicate": false
+  }
+ ]
+}

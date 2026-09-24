@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot generator="Robot 6.1.1 (Python 3.14.4 on linux)" generated="20260923 22:14:52.900" rpa="false" schemaversion="4">
+<suite id="s1" name="Exemplo" source="/snapshot/scenarios/exemplo/exemplo.robot">
+<test id="s1-t1" name="CT_EXEMPLO_01-Fluxo-com-falha (ç+$)" line="9">
+<kw name="Clicar no elemento">
+<msg timestamp="20260923 22:15:36.900" level="FAIL">Element locator '//*[@resource-id="auth.submit.button"]' did not match any elements after 20 seconds</msg>
+<status status="FAIL" starttime="20260923 22:15:16.900" endtime="20260923 22:15:36.900">Element locator '//*[@resource-id="auth.submit.button"]' did not match any elements after 20 seconds</status>
+</kw>
+<kw name="Fechar o aplicativo" type="TEARDOWN">
+<kw name="Stop Screen Recording" library="AppiumLibrary">
+<msg timestamp="20260923 22:15:36.990" level="FAIL">There is no Active Screen Record Session.</msg>
+<status status="FAIL" starttime="20260923 22:15:36.987" endtime="20260923 22:15:36.990">There is no Active Screen Record Session.</status>
+</kw>
+<status status="FAIL" starttime="20260923 22:15:36.987" endtime="20260923 22:15:40.997">There is no Active Screen Record Session.</status>
+</kw>
+<tag>regressivo_exemplo</tag>
+<status status="FAIL" starttime="20260923 22:14:52.965" endtime="20260923 22:15:40.997">Element locator '//*[@resource-id="auth.submit.button"]' did not match any elements after 20 seconds
+
+Also teardown failed:
+There is no Active Screen Record Session.</status>
+</test>
+<status status="FAIL" starttime="20260923 22:14:52.900" endtime="20260923 22:15:40.999"/>
+</suite>
+<statistics>
+<total>
+<stat pass="0" fail="1" skip="0">All Tests</stat>
+</total>
+</statistics>
+<errors>
+</errors>
+</robot>

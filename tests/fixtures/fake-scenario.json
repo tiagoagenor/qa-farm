@@ -1,0 +1,1 @@
+{ "bootDelayMs": 600, "installDelayMs": 200, "emulators": 0, "physical": [{ "serial": "FAKE-PHYSICAL-01", "adbState": "device" }] }
