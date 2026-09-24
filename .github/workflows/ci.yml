@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Dependências
+        run: |
+          npm ci
+          python -m pip install -r requirements-dev.txt
+      - name: Lint + padrão AAA
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Vitest (unidade, runner em modo simulado, API)
+        run: npm test
+      - name: Pytest (listener e catálogo com Robot Framework 6.1.1)
+        run: python -m pytest scripts/robot/tests -m "not server" -q
+      - name: Playwright (build de produção em modo simulado)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
