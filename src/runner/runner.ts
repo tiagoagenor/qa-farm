@@ -122,7 +122,7 @@ export class Runner {
     this.desired = (await readJson(this.p.desired, DesiredSchema, { devices: 0 })).devices
     this.catalog = await readJson(this.p.catalog, CatalogSchema.nullable(), null)
     this.catalogStatus = this.catalog ? "ready" : "missing"
-    this.pickActiveApp()
+    await this.pickActiveApp()
     void this.refreshCatalog(false)
     this.log(`iniciado (fake=${this.cfg.fake}) filas=${this.queues.size} desejados=${this.desired}`)
   }
@@ -193,12 +193,30 @@ export class Runner {
     return meta
   }
 
-  /** App ativo = app da fila ativa mais antiga (um app por vez nos celulares). */
-  private pickActiveApp(): void {
+  /**
+   * App ativo (um app por vez nos celulares): o da fila ativa mais antiga; sem fila ativa, o APK enviado
+   * mais recentemente — assim ele já fica pré-instalado e a próxima fila começa sem esperar a instalação.
+   */
+  private async pickActiveApp(): Promise<void> {
     const active = [...this.queues.values()]
       .filter((q) => (q.status === "running" || q.status === "paused") && q.items.some((i) => i.status === "queued" || i.status === "running"))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]
-    if (active) this.activeAppId = active.appId
+    if (active) {
+      this.activeAppId = active.appId
+      return
+    }
+    const newest = await this.newestAppId()
+    if (newest) this.activeAppId = newest
+  }
+
+  private async newestAppId(): Promise<string | undefined> {
+    const dirs = await fsp.readdir(this.p.apps).catch(() => [] as string[])
+    let best: AppMeta | null = null
+    for (const d of dirs) {
+      const m = await this.appMeta(d)
+      if (m && (!best || m.uploadedAt > best.uploadedAt)) best = m
+    }
+    return best?.id
   }
 
   // ------------------------------------------------------------- catálogo ---
@@ -274,7 +292,7 @@ export class Runner {
         const { queue, missing } = buildQueue(newId("queue"), c.input, byId, new Date())
         if (queue.items.length === 0) return { ok: false, message: "Nenhum caso selecionado existe no catálogo atual" }
         this.setQueue({ ...queue, snapshotHash: snap.hash })
-        this.pickActiveApp()
+        await this.pickActiveApp()
         return {
           ok: true,
           message: `Fila criada com ${queue.items.length} caso(s)${missing.length ? ` (${missing.length} ignorado(s): não existem mais)` : ""}`,
@@ -536,7 +554,7 @@ export class Runner {
 
   // -------------------------------------------------------------- execução ---
   private async dispatch(): Promise<void> {
-    this.pickActiveApp()
+    await this.pickActiveApp()
     const free = [...this.devices.values()]
       .filter((d) => d.kind === "emulator" && d.state === "ready" && d.index && ![...this.running.values()].some((r) => r.serial === d.serial))
       .map((d) => ({ serial: d.serial, index: d.index! }))

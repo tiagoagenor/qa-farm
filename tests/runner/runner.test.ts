@@ -37,6 +37,20 @@ describe("runner (modo fake)", () => {
     ])
   })
 
+  it("sem fila ativa, o APK enviado mais recente já é pré-instalado", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 2 })
+
+    // Act
+    await h.tickUntil(() => h.runner.snapshotForTests().devices.filter((d) => d.appVersionCode === 5528).length === 2 || undefined)
+
+    // Assert
+    expect(h.runner.snapshotForTests().devices.map((d) => [d.state, d.appVersionCode])).toEqual([
+      ["ready", 5528],
+      ["ready", 5528],
+    ])
+  })
+
   it("aparelho físico aparece como externo e nunca recebe caso", async () => {
     // Arrange
     h = await makeHarness({ emulators: 0, physical: ["FAKE-PHYSICAL-01"] })
