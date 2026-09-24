@@ -61,7 +61,7 @@ export function buildQueue(
       attempts: [],
     })
   }
-  const options: QueueOptions = { timeoutSec: input.timeoutSec, retries: input.retries, closeAppAfter: input.closeAppAfter ?? true }
+  const options: QueueOptions = { timeoutSec: input.timeoutSec, retries: input.retries, closeAppAfter: input.closeAppAfter ?? true, allowSameAccount: input.allowSameAccount ?? false }
   return {
     queue: {
       id,

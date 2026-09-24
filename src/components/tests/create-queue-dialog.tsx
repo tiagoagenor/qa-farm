@@ -34,6 +34,7 @@ export function CreateQueueDialog({
   const [timeoutMin, setTimeoutMin] = useState("15")
   const [retries, setRetries] = useState("0")
   const [closeAppAfter, setCloseAppAfter] = useState(true)
+  const [allowSameAccount, setAllowSameAccount] = useState(true)
   const [sending, setSending] = useState(false)
 
   useEffect(() => {
@@ -61,7 +62,7 @@ export function CreateQueueDialog({
     setSending(true)
     const res = await sendCommand({
       type: "create_queue",
-      input: { name: name.trim(), appId, env, timeoutSec, retries: Number(retries), closeAppAfter, testIds },
+      input: { name: name.trim(), appId, env, timeoutSec, retries: Number(retries), closeAppAfter, allowSameAccount, testIds },
     })
     setSending(false)
     if (res?.ok && res.data?.queueId) {
@@ -144,6 +145,21 @@ export function CreateQueueDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div className="flex items-start justify-between gap-4 rounded-md border p-3">
+            <div className="grid gap-1">
+              <Label htmlFor="q-same-account">Usar vários celulares com a mesma conta</Label>
+              <p className="text-muted-foreground text-xs">
+                Os casos saem em sequência para qualquer celular livre, mesmo usando a mesma conta (cada caso faz o próprio
+                login). Desligue se o app derrubar a sessão quando a conta entra em outro aparelho.
+              </p>
+            </div>
+            <Switch
+              id="q-same-account"
+              checked={allowSameAccount}
+              onCheckedChange={setAllowSameAccount}
+              data-testid="queue-same-account"
+            />
           </div>
           <div className="flex items-start justify-between gap-4 rounded-md border p-3">
             <div className="grid gap-1">

@@ -146,4 +146,33 @@ describe("schedule", () => {
     // Assert
     expect(result).toEqual([])
   })
+
+  it("fila com mesma conta liberada distribui em sequência para todos os celulares livres", () => {
+    // Arrange
+    const q = queue([item("A", ["usuario_x"]), item("B", ["usuario_x"]), item("C", ["usuario_x"])], {
+      options: { timeoutSec: 60, retries: 0, allowSameAccount: true },
+    })
+    const livres = [device("emulator-5554"), device("emulator-5556"), device("emulator-5558")]
+
+    // Act
+    const result = schedule([q], livres, [])
+
+    // Assert
+    expect(result.map((a) => a.itemId)).toEqual(["A", "B", "C"])
+  })
+
+  it("fila com mesma conta liberada não espera a conta que já está rodando", () => {
+    // Arrange
+    const base = queue([item("A", ["usuario_x"]), item("B", ["usuario_x"])], {
+      options: { timeoutSec: 60, retries: 0, allowSameAccount: true },
+    })
+    const q = { ...base, items: base.items.map((i) => (i.id === "A" ? { ...i, status: "running" as const } : i)) }
+    const running = [{ queueId: q.id, itemId: "A", serial: "emulator-5554", accounts: ["usuario_x"] }]
+
+    // Act
+    const result = schedule([q], [device("emulator-5556")], running)
+
+    // Assert
+    expect(result).toEqual([{ queueId: q.id, itemId: "B", serial: "emulator-5556" }])
+  })
 })

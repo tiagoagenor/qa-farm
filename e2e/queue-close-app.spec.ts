@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
   await ensureApp(page.request)
 })
 
-test("fechar o app ao terminar o caso vem ligado e pode ser desligado na criação da fila", async ({ page }) => {
+test("fechar o app e usar a mesma conta em vários celulares vêm ligados; fechar o app pode ser desligado", async ({ page }) => {
   // Arrange
   await page.goto("/testes")
   await page.getByTestId("catalog-search").fill("CT_LOGIN_01-Caso-PASS")
@@ -16,6 +16,7 @@ test("fechar o app ao terminar o caso vem ligado e pode ser desligado na criaç�
   await page.getByTestId("open-create-queue").click()
   const toggle = page.getByTestId("queue-close-app")
   await expect(toggle).toHaveAttribute("data-state", "checked")
+  await expect(page.getByTestId("queue-same-account")).toHaveAttribute("data-state", "checked")
 
   // Act
   await toggle.click()
@@ -23,5 +24,5 @@ test("fechar o app ao terminar o caso vem ligado e pode ser desligado na criaç�
 
   // Assert
   await expect(page).toHaveURL(/\/filas\/queue_/, { timeout: 30_000 })
-  await expect(page.getByText("app fica aberto ao fim do caso")).toBeVisible()
+  await expect(page.getByText(/app fica aberto ao fim do caso · mesma conta em vários celulares/)).toBeVisible()
 })

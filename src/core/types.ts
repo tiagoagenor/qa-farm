@@ -114,6 +114,8 @@ export const QueueOptionsSchema = z.object({
   retries: z.number().int().min(0).max(5),
   /** fecha o app (force-stop) ao fim de cada caso — o app deixado aberto segue tocando vídeo e gastando CPU */
   closeAppAfter: z.boolean().optional(), // ausente = true
+  /** casos com a mesma conta rodam em vários celulares ao mesmo tempo (cada caso faz o próprio login); ausente = trava por conta */
+  allowSameAccount: z.boolean().optional(),
 })
 export type QueueOptions = z.infer<typeof QueueOptionsSchema>
 
@@ -199,6 +201,7 @@ export const CreateQueueInputSchema = z.object({
   timeoutSec: z.number().int().min(10).max(24 * 3600),
   retries: z.number().int().min(0).max(5),
   closeAppAfter: z.boolean().optional(), // ausente = true
+  allowSameAccount: z.boolean().optional(), // ausente = false (trava por conta)
   testIds: z.array(z.string()).min(1).max(5000),
 })
 export type CreateQueueInput = z.infer<typeof CreateQueueInputSchema>

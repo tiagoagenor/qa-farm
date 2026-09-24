@@ -368,7 +368,7 @@ export class Runner {
         if (ids.length === 0) return { ok: false, message: "Não há falhas para rodar de novo" }
         return this.handle({
           type: "create_queue",
-          input: { name: `${q.name} · re-run falhas`, appId: q.appId, env: q.env, timeoutSec: q.options.timeoutSec, retries: q.options.retries, closeAppAfter: q.options.closeAppAfter, testIds: ids },
+          input: { name: `${q.name} · re-run falhas`, appId: q.appId, env: q.env, timeoutSec: q.options.timeoutSec, retries: q.options.retries, closeAppAfter: q.options.closeAppAfter, allowSameAccount: q.options.allowSameAccount, testIds: ids },
         })
       }
       case "retry_item": {

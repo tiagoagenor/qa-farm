@@ -398,7 +398,7 @@ export function QueueDetail({ id }: { id: string }) {
             {q.name} <StatusBadge {...QUEUE_STATUS[q.status]} />
           </span>
         }
-        description={`Criada ${formatDateTime(q.createdAt)} · ambiente ${q.env} · timeout ${formatDuration(q.options.timeoutSec)} · ${q.options.retries} tentativa(s) extra(s) · ${q.options.closeAppAfter === false ? "app fica aberto ao fim do caso" : "fecha o app ao fim de cada caso"}`}
+        description={`Criada ${formatDateTime(q.createdAt)} · ambiente ${q.env} · timeout ${formatDuration(q.options.timeoutSec)} · ${q.options.retries} tentativa(s) extra(s) · ${q.options.closeAppAfter === false ? "app fica aberto ao fim do caso" : "fecha o app ao fim de cada caso"} · ${q.options.allowSameAccount ? "mesma conta em vários celulares" : "uma conta por vez"}`}
         actions={
           <>
             {q.status === "running" && (

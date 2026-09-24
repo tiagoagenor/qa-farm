@@ -304,6 +304,23 @@ describe("runner (modo fake)", () => {
     expect([accountOverlaps([q]), deviceOverlaps([q])]).toEqual([[], []])
   })
 
+  it("fila com a mesma conta liberada roda casos da mesma conta em vários celulares ao mesmo tempo", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 4 })
+    const ids = await h.catalogIds((n) => n.startsWith("CT_TED_") && n.includes("PASS"))
+    const input = { ...queueInput(ids), allowSameAccount: true }
+
+    // Act
+    const created = await h.command({ type: "create_queue", input })
+    const q = await h.tickUntil(() => {
+      const live = liveQueue(created.data!.queueId as string)
+      return finished(live) ? live : undefined
+    }, 60_000)
+
+    // Assert
+    expect([peakConcurrency([q]) >= 3, deviceOverlaps([q])]).toEqual([true, []])
+  })
+
   it("usa vários celulares ao mesmo tempo quando não há conflito de conta", async () => {
     // Arrange
     h = await makeHarness({ emulators: 4 })
