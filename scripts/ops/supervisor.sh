@@ -30,7 +30,7 @@ log() { echo "[$(ts)] $*" >> "$LOGS/supervisor.log"; }
 
 alive() { # $1 = pidfile, $2 = trecho esperado no comando
   local pid; pid=$(cat "$1" 2>/dev/null) || return 1
-  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q -- "$2"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -Eq -- "$2"
 }
 
 rotate_logs() { # mantém cada log com no máximo ~50 MB (preserva os últimos 10 MB)
@@ -44,7 +44,7 @@ rotate_logs() { # mantém cada log com no máximo ~50 MB (preserva os últimos 1
 }
 
 start_web() {
-  alive "$RUN/web.pid" "next start" && return 0
+  alive "$RUN/web.pid" "next-server|next start" && return 0
   log "subindo web na porta $PORT"
   setsid nohup "$REPO/node_modules/.bin/next" start -H 0.0.0.0 -p "$PORT" >> "$LOGS/web.log" 2>&1 < /dev/null &
   echo $! > "$RUN/web.pid"
@@ -81,7 +81,7 @@ stop_one() { # $1 = pidfile
 }
 
 status() {
-  alive "$RUN/web.pid" "next start" && echo "web:    rodando (pid $(cat "$RUN/web.pid"), porta $PORT)" || echo "web:    parado"
+  alive "$RUN/web.pid" "next-server|next start" && echo "web:    rodando (pid $(cat "$RUN/web.pid"), porta $PORT)" || echo "web:    parado"
   alive "$RUN/runner.pid" "runner.mjs" && echo "runner: rodando (pid $(cat "$RUN/runner.pid"), heartbeat há $(runner_heartbeat_age)s)" || echo "runner: parado"
 }
 
