@@ -25,7 +25,7 @@ chmod +x scripts/ops/*.sh scripts/farm/*.sh
 
 CRON_START="* * * * * $REPO/scripts/ops/supervisor.sh start >/dev/null 2>&1"
 CRON_BOOT="@reboot sleep 30 && $REPO/scripts/ops/supervisor.sh start >/dev/null 2>&1"
-( crontab -l 2>/dev/null | grep -v "qa-farm/scripts/ops/supervisor.sh" ; echo "$CRON_START"; echo "$CRON_BOOT" ) | crontab -
+{ crontab -l 2>/dev/null | grep -v "qa-farm/scripts/ops/supervisor.sh" || true; echo "$CRON_START"; echo "$CRON_BOOT"; } | crontab -
 echo "crontab:"; crontab -l | grep supervisor
 
 scripts/ops/supervisor.sh restart
