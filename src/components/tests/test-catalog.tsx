@@ -1,7 +1,7 @@
 "use client"
 
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { AlertTriangle, ListPlus, RefreshCw, X } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileCode2, Folder, FolderOpen, ListPlus, RefreshCw, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { CatalogEntry } from "@/core/types"
@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { usePoll } from "@/hooks/use-poll"
 import { filterEntries, folderOptions, tagOptions, toggleRange } from "@/lib/catalog-filter"
+import { allGroupKeys, buildTreeRows, groupCheck, toggleGroup } from "@/lib/catalog-tree"
 import { sendCommand } from "@/lib/client"
 import { formatDuration } from "@/lib/format"
 
@@ -43,6 +44,7 @@ export function TestCatalog() {
   const [onlySelected, setOnlySelected] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [lastIndex, setLastIndex] = useState<number | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [dialog, setDialog] = useState(false)
   const [sheet, setSheet] = useState(false)
   const parentRef = useRef<HTMLDivElement>(null)
@@ -79,8 +81,13 @@ export function TestCatalog() {
   const minSec = minTheoreticalSec(selectedEntries.map((e) => ({ accounts: e.accounts, status: "queued" })), devices, 120)
   const withoutAccount = selectedEntries.filter((e) => e.accounts.length === 0).length
 
+  // com busca/filtro ativo a árvore aparece aberta para mostrar onde está cada caso encontrado
+  const filtering = !!(search.trim() || folders.size || tags.size || onlySelected)
+  const rows = useMemo(() => buildTreeRows(visible, expanded, filtering), [visible, expanded, filtering])
+  const testRows = useMemo(() => rows.flatMap((r) => (r.kind === "test" ? [r.entry] : [])), [rows])
+
   const virtualizer = useVirtualizer({
-    count: visible.length,
+    count: rows.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_H,
     overscan: 12,
@@ -93,6 +100,13 @@ export function TestCatalog() {
     if (allVisibleSelected) for (const e of visible) next.delete(e.id)
     else for (const e of visible) next.add(e.id)
     setSelected(next)
+  }
+
+  function toggleExpand(key: string) {
+    const next = new Set(expanded)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    setExpanded(next)
   }
 
   async function refreshCatalog() {
@@ -153,7 +167,15 @@ export function TestCatalog() {
             <X /> Limpar filtros
           </Button>
         )}
-        <span className="text-muted-foreground ml-auto text-sm" data-testid="visible-count">
+        <div className="ml-auto flex gap-1">
+          <Button variant="ghost" size="sm" disabled={filtering} onClick={() => setExpanded(new Set(allGroupKeys(entries)))} data-testid="expand-all">
+            <ChevronsUpDown /> Expandir tudo
+          </Button>
+          <Button variant="ghost" size="sm" disabled={filtering} onClick={() => setExpanded(new Set())}>
+            <ChevronsDownUp /> Recolher
+          </Button>
+        </div>
+        <span className="text-muted-foreground text-sm" data-testid="visible-count">
           {visible.length} de {entries.length} casos
         </span>
       </div>
@@ -168,40 +190,79 @@ export function TestCatalog() {
         <EmptyState title="Nenhum caso no catálogo">Aguarde a geração ou clique em Atualizar catálogo.</EmptyState>
       ) : (
         <div className="rounded-md border">
-          <div className="bg-muted/50 text-muted-foreground grid grid-cols-[40px_minmax(0,2.2fr)_minmax(0,1.2fr)_minmax(0,1.3fr)_minmax(0,1fr)] items-center gap-2 border-b px-3 py-2 text-xs font-medium">
+          <div className="bg-muted/50 text-muted-foreground grid grid-cols-[40px_minmax(0,3fr)_minmax(0,1.4fr)_minmax(0,1fr)] items-center gap-2 border-b px-3 py-2 text-xs font-medium">
             <Checkbox
               checked={allVisibleSelected ? true : visible.some((e) => selected.has(e.id)) ? "indeterminate" : false}
               onCheckedChange={selectVisible}
               aria-label="Selecionar todos os filtrados"
               data-testid="select-visible"
             />
-            <span>Caso</span>
-            <span>Arquivo</span>
+            <span>Pasta / arquivo / caso</span>
             <span>Tags</span>
             <span>Conta de teste</span>
           </div>
           <div ref={parentRef} className="h-[calc(100vh-330px)] min-h-[320px] overflow-auto" data-testid="catalog-rows">
             <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-              {virtualizer.getVirtualItems().map((row) => {
-                const e = visible[row.index]
+              {virtualizer.getVirtualItems().map((vrow) => {
+                const r = rows[vrow.index]
+                const style = { height: ROW_H, transform: `translateY(${vrow.start}px)` }
+                const indent = { paddingLeft: `${r.depth * 20}px` }
+                if (r.kind !== "test") {
+                  const open = filtering || expanded.has(r.key)
+                  const count = r.ids.length
+                  const sel = r.ids.filter((id) => selected.has(id)).length
+                  return (
+                    <div
+                      key={r.key}
+                      className={`hover:bg-muted/40 absolute inset-x-0 grid cursor-pointer grid-cols-[40px_minmax(0,1fr)] items-center gap-2 border-b px-3 text-sm ${r.kind === "folder" ? "bg-muted/30 font-semibold" : "font-medium"}`}
+                      style={style}
+                      onClick={() => !filtering && toggleExpand(r.key)}
+                      data-testid={r.kind === "folder" ? "tree-folder" : "tree-file"}
+                      data-key={r.key}
+                    >
+                      <span onClick={(ev) => ev.stopPropagation()} className="flex">
+                        <Checkbox
+                          checked={groupCheck(r.ids, selected)}
+                          onCheckedChange={() => setSelected(toggleGroup(r.ids, selected))}
+                          aria-label={`Selecionar ${r.name}`}
+                          data-testid="group-check"
+                        />
+                      </span>
+                      <span className="flex min-w-0 items-center gap-1.5" style={indent}>
+                        {open ? <ChevronDown className="size-4 shrink-0 opacity-60" /> : <ChevronRight className="size-4 shrink-0 opacity-60" />}
+                        {r.kind === "folder" ? (
+                          open ? <FolderOpen className="size-4 shrink-0 text-amber-600" /> : <Folder className="size-4 shrink-0 text-amber-600" />
+                        ) : (
+                          <FileCode2 className="size-4 shrink-0 text-sky-600" />
+                        )}
+                        <span className="truncate" title={r.key}>
+                          {r.name}
+                        </span>
+                        <span className="text-muted-foreground ml-1 shrink-0 text-xs font-normal">
+                          {count} caso{count === 1 ? "" : "s"}
+                          {sel > 0 && ` · ${sel} selecionado${sel === 1 ? "" : "s"}`}
+                        </span>
+                      </span>
+                    </div>
+                  )
+                }
+                const e = r.entry
                 const checked = selected.has(e.id)
+                const ti = testRows.indexOf(e)
                 return (
                   <div
-                    key={e.id}
-                    className={`hover:bg-muted/40 absolute inset-x-0 grid cursor-pointer grid-cols-[40px_minmax(0,2.2fr)_minmax(0,1.2fr)_minmax(0,1.3fr)_minmax(0,1fr)] items-center gap-2 border-b px-3 text-sm ${checked ? "bg-primary/5" : ""}`}
-                    style={{ height: ROW_H, transform: `translateY(${row.start}px)` }}
+                    key={r.key}
+                    className={`hover:bg-muted/40 absolute inset-x-0 grid cursor-pointer grid-cols-[40px_minmax(0,3fr)_minmax(0,1.4fr)_minmax(0,1fr)] items-center gap-2 border-b px-3 text-sm ${checked ? "bg-primary/5" : ""}`}
+                    style={style}
                     onClick={(ev) => {
-                      setSelected(toggleRange(selected, visible, lastIndex, row.index, ev.shiftKey))
-                      setLastIndex(row.index)
+                      setSelected(toggleRange(selected, testRows, lastIndex, ti, ev.shiftKey))
+                      setLastIndex(ti)
                     }}
                     data-testid="catalog-row"
                   >
                     <Checkbox checked={checked} aria-label={`Selecionar ${e.name}`} tabIndex={-1} className="pointer-events-none" />
-                    <span className="truncate font-medium" title={e.name}>
+                    <span className="truncate" style={{ paddingLeft: `${r.depth * 20 + 20}px` }} title={`${e.name}\n${e.file}:${e.line}`}>
                       {e.name}
-                    </span>
-                    <span className="text-muted-foreground truncate text-xs" title={`${e.file}:${e.line}`}>
-                      {e.file.replace(/^scenarios\//, "")}
                     </span>
                     <span className="flex gap-1 overflow-hidden">
                       {e.tags.slice(0, 2).map((t) => (

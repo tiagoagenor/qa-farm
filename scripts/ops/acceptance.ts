@@ -1,5 +1,5 @@
 // Testes de aceitação do QA Farm no server01 (tudo real: emuladores, Appium, Robot, painel).
-// Uso (no server01, dentro de ~/qa-farm):
+// Uso (no server01, dentro de /home/server01/www/qa-farm):
 //   set -a; . ./.env; set +a; npx tsx scripts/ops/acceptance.ts <passo...>
 // Passos: t1 t2 t31 t34 t35 t36 t37 t32 t38 t39 t41 t42 t43 t44 t6 t24  (ou "all")
 // Evidências: ~/qa-farm-data/aceite/aceite.jsonl (uma linha por verificação).

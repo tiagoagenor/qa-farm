@@ -4,7 +4,7 @@ Painel para rodar os testes Robot do **QA_Automacao_APP** em massa, em vários c
 
 - **Apps** — envie o APK a testar (validação automática: x86_64, versão mínima do Android, duplicados).
 - **Celulares** — veja todos os aparelhos do ADB, ligue/desligue emuladores, veja a tela.
-- **Testes** — os 1251 casos do projeto, com busca e filtro por pasta/tag; selecione quantos quiser.
+- **Testes** — os 1251 casos do projeto agrupados como no projeto (pasta → arquivo .robot → caso), com busca e filtro por tag; marque um caso, um arquivo ou uma pasta inteira.
 - **Filas** — cada celular livre pega o próximo caso; resultado ✅/❌ por caso, mensagem de erro, print, `log.html`, console ao vivo e histórico.
 
 Sem banco de dados: tudo fica em arquivos em `~/qa-farm-data`. O projeto Robot **não é alterado**.
@@ -12,7 +12,7 @@ Sem banco de dados: tudo fica em arquivos em `~/qa-farm-data`. O projeto Robot *
 ## Como funciona
 
 ```
-Navegador ─▶ Next.js (painel + API) ──comandos (JSON)──▶ Runner ─▶ Appium (1 por celular) ─▶ emuladores
+Navegador ─▶ Next.js (painel + API) ──comandos (JSON)──▶ Runner ─▶ Appium (1 p/ 5 celulares) ─▶ emuladores
                         ▲                                   │
                         └──────── ~/qa-farm-data ◀──────────┘  (filas, resultados, logs)
 ```
@@ -24,17 +24,17 @@ Navegador ─▶ Next.js (painel + API) ──comandos (JSON)──▶ Runner �
 
 ## Uso no server01
 
-Painel: **http://192.168.100.32:3000** (senha no `~/qa-farm/.env`, variável `QAFARM_PASSWORD`).
+Painel: **http://192.168.100.32:3000** (senha no `/home/server01/www/qa-farm/.env`, variável `QAFARM_PASSWORD`).
 
 ```bash
-~/qa-farm/scripts/ops/supervisor.sh status    # web e runner rodando?
-~/qa-farm/scripts/ops/deploy.sh               # atualizar para a última versão do GitHub
+/home/server01/www/qa-farm/scripts/ops/supervisor.sh status    # web e runner rodando?
+/home/server01/www/qa-farm/scripts/ops/deploy.sh               # atualizar para a última versão do GitHub
 tail -f ~/qa-farm-data/logs/runner.log        # o que o runner está fazendo
 ```
 
 O `crontab` do usuário chama `supervisor.sh start` a cada minuto e no boot: se web ou runner caírem, voltam sozinhos. Emuladores desejados (botão **Ligar N**) também voltam após reboot.
 
-Primeira instalação (já feita): `git clone git@github.com:tiagoagenor/qa-farm.git ~/qa-farm && ~/qa-farm/scripts/ops/install.sh`.
+Primeira instalação (já feita): `git clone git@github.com:tiagoagenor/qa-farm.git /home/server01/www/qa-farm && /home/server01/www/qa-farm/scripts/ops/install.sh`.
 
 ### Dados (`~/qa-farm-data`)
 
@@ -44,7 +44,7 @@ Primeira instalação (já feita): `git clone git@github.com:tiagoagenor/qa-farm
 | `queues/<id>.json` | fila, casos, tentativas e resultados |
 | `runs/<fila>/<caso>/a<N>/` | `log.html`, `report.html`, `output.xml`, `console.log`, prints, `session.json`, `result.json` |
 | `catalog/catalog.json` | catálogo de casos gerado do projeto |
-| `logs/` | `runner.log`, `web.log`, `farm.log`, `appium-<serial>.log` |
+| `logs/` | `runner.log`, `web.log`, `farm.log`, `appium-g<grupo>.log` |
 
 ## Desenvolvimento (Mac, sem emuladores)
 
@@ -93,5 +93,5 @@ scripts/ops/sample-resources.sh 900 recursos.csv                    # memória/O
 
 - Só o modo `LOC:local` (o servidor da cantina não é acessível do server01): o APK vem do upload.
 - Um app por vez nos celulares: filas com APKs diferentes rodam uma depois da outra.
-- Limite de ~18 emuladores de 2 GB (RAM do servidor).
+- Limite prático de 15 emuladores de 2 GB (RAM do servidor; ver docs/ACEITE.md).
 - Casos que usam a mesma conta de teste rodam em série (ex.: `usuario_ofertas_publicas` aparece em 87 casos).
