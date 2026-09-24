@@ -35,6 +35,8 @@ function record(id: string, ok: boolean, detail: string, data?: unknown) {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/** Padrão para pgrep -f que não casa com o próprio bash que roda o pgrep ("abc" → "[a]bc"). */
+const pg = (pattern: string) => `[${pattern[0]}]${pattern.slice(1)}`
 const sh = (cmd: string) => {
   try {
     return execFileSync("bash", ["-c", cmd], { encoding: "utf8", timeout: 120_000 }).trim()
@@ -86,6 +88,7 @@ async function waitFor<T>(what: string, fn: () => Promise<T | undefined | false>
   }
 }
 
+const formatSec = (a: { startedAt: string; endedAt?: string }) => `${Math.round((Date.parse(a.endedAt ?? "") - Date.parse(a.startedAt)) / 1000)}s`
 const TERMINAL = new Set(["passed", "failed", "timeout", "infra_error", "config_error", "canceled"])
 async function waitQueueDone(id: string, timeoutMs: number) {
   let last = ""
@@ -236,7 +239,9 @@ const steps: Record<string, () => Promise<void>> = {
     const q = await waitQueueDone(id, 15 * 60_000)
     const a = q.items[0].attempts.at(-1)!
     const xml = fs.readFileSync(path.join(P.runs, a.dir, "output.xml"), "utf8")
-    const raw = /<status status="FAIL"[^>]*>([\s\S]*?)<\/status>\s*<\/test>/.exec(xml)?.[1] ?? ""
+    const testBody = xml.slice(xml.lastIndexOf("<test "), xml.lastIndexOf("</test>"))
+    const lastStatus = testBody.slice(testBody.lastIndexOf("<status "))
+    const raw = lastStatus.slice(lastStatus.indexOf(">") + 1, lastStatus.lastIndexOf("</status>"))
     const decoded = raw.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
     const expected = decoded.split("\n\nAlso teardown failed:")[0]
     record("T3.4", q.items[0].status === "failed" && a.message === expected && !!a.teardownMessage, `status ${q.items[0].status}; mensagem = output.xml (${a.message?.slice(0, 90)}…); teardown="${a.teardownMessage}"`)
@@ -245,12 +250,14 @@ const steps: Record<string, () => Promise<void>> = {
   async t35() {
     await login()
     const id = await createQueue("T3.5 timeout 20s", await idsByName(["CT_LOGIN_01"]), { timeoutSec: 20 })
+    const pgid = await waitFor("caso rodando", async () => (await queue(id)).items[0].attempts[0]?.pgid, 5 * 60_000, 1000)
+    const aliveBefore = Number(sh(`ps -o pid= -g ${pgid} | wc -l`))
     const q = await waitQueueDone(id, 5 * 60_000)
     const a = q.items[0].attempts.at(-1)!
     await sleep(12_000)
-    const alive = sh(`ps -o pid= -g ${a.pgid ?? 0} 2>/dev/null | wc -l`)
+    const alive = Number(sh(`ps -o pid= -g ${pgid} | wc -l`))
     const dev = (await devices()).find((d) => d.serial === a.serial)
-    record("T3.5", q.items[0].status === "timeout" && dev?.state !== "busy", `status ${q.items[0].status}; processos restantes do grupo: ${alive || 0}; ${a.serial} agora "${dev?.state}"`)
+    record("T3.5", q.items[0].status === "timeout" && alive === 0 && dev?.state !== "busy", `status ${q.items[0].status} após ${formatSec(a)}; processos do grupo ${pgid}: ${aliveBefore} rodando → ${alive} depois; ${a.serial} agora "${dev?.state}"`)
   },
 
   async t36() {
@@ -268,7 +275,7 @@ const steps: Record<string, () => Promise<void>> = {
     const cancel = await command({ type: "cancel_queue", queueId: id })
     const q = await waitQueueDone(id, 3 * 60_000)
     await sleep(12_000)
-    const robots = Number(sh(`pgrep -fc "outputdir ${P.runs}/${id}/" || true`) || 0)
+    const robots = Number(sh(`pgrep -fc "${pg(`outputdir ${P.runs}/${id}/`)}" || true`) || 0)
     record(
       "T3.6",
       pause.ok && started1 === started0 && resume.ok && cancel.ok && q.status === "canceled" && robots === 0,
@@ -331,7 +338,7 @@ const steps: Record<string, () => Promise<void>> = {
     const p95 = lat[Math.floor(lat.length * 0.95)]
     record("T5.2", p95 < 1000, `latência /api/queues/:id com fila rodando: p50 ${lat[30].toFixed(0)} ms, p95 ${p95.toFixed(0)} ms (60 amostras)`)
     // T6.5: ambiente de um robot em execução
-    const pid = sh(`pgrep -f "outputdir ${P.runs}/${id}/" | head -1`)
+    const pid = sh(`pgrep -f "${pg(`outputdir ${P.runs}/${id}/`)}" | head -1`)
     const envv = pid ? sh(`tr '\\0' '\\n' < /proc/${pid}/environ | cut -d= -f1 | sort | tr '\\n' ' '`) : ""
     record("T6.5", !!pid && !/QAFARM_PASSWORD|QAFARM_SECRET/.test(envv), `variáveis do robot pid ${pid}: ${envv}`)
     const q = await waitQueueDone(id, 4 * 3600_000)
@@ -400,7 +407,7 @@ const steps: Record<string, () => Promise<void>> = {
     const back = Math.round((Date.now() - t0) / 1000)
     await sleep(120_000)
     const st = JSON.parse(fs.readFileSync(P.runnerState, "utf8"))
-    const robotPids = sh(`pgrep -f "qafarm_listener" | xargs -r ps -o pgid= -p | sort -u | tr -d ' '`).split("\n").filter(Boolean).map(Number)
+    const robotPids = sh(`pgrep -f "${pg("qafarm_listener")}" | xargs -r ps -o pgid= -p | sort -u | tr -d ' '`).split("\n").filter(Boolean).map(Number)
     const orphans = robotPids.filter((g) => !st.pgids.includes(g))
     const q = await waitQueueDone(id, 60 * 60_000)
     record("T4.2", back <= 90 && orphans.length === 0 && q.status === "done", `runner voltou em ${back}s; robots fora dos PGIDs do runner após 2 min: ${orphans.length}; fila terminou (${q.status})`)
@@ -424,7 +431,7 @@ const steps: Record<string, () => Promise<void>> = {
     await login()
     await waitFor("sem filas ativas", async () => (await json<{ queues: Array<{ status: string }> }>("/api/queues")).queues.every((q) => q.status === "done" || q.status === "canceled"), 30 * 60_000, 10_000)
     await sleep(15_000)
-    const robots = Number(sh(`pgrep -fc qafarm_listener || true`) || 0)
+    const robots = Number(sh(`pgrep -fc "${pg("qafarm_listener")}" || true`) || 0)
     const sessions: number[] = []
     for (let i = 1; i <= 15; i++) {
       const r = sh(`curl -s -m 3 127.0.0.1:${4800 + i}/wd/hub/appium/sessions`)
