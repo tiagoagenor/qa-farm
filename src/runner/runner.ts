@@ -368,7 +368,7 @@ export class Runner {
         if (ids.length === 0) return { ok: false, message: "Não há falhas para rodar de novo" }
         return this.handle({
           type: "create_queue",
-          input: { name: `${q.name} · re-run falhas`, appId: q.appId, env: q.env, timeoutSec: q.options.timeoutSec, retries: q.options.retries, testIds: ids },
+          input: { name: `${q.name} · re-run falhas`, appId: q.appId, env: q.env, timeoutSec: q.options.timeoutSec, retries: q.options.retries, closeAppAfter: q.options.closeAppAfter, testIds: ids },
         })
       }
       case "retry_item": {
@@ -582,6 +582,11 @@ export class Runner {
             // Aparelho físico: não mexemos nas configurações do sistema dele (só fechamos diálogos antes de cada caso).
             if (!isPhysical) await this.ad.adb.putGlobalSetting(d.serial, "hide_error_dialogs", "1")
             await this.ad.adb.closeSystemDialogs(d.serial)
+            if (!isPhysical) {
+              // sem tela de bloqueio + tela apagada enquanto espera caso: não gasta CPU desenhando a tela à toa
+              await this.ad.adb.disableLockscreen(d.serial)
+              await this.ad.adb.keyevent(d.serial, "SLEEP")
+            }
             this.prepared.add(d.serial)
           }
           next.set(d.serial, { ...base, state: "ready", appVersionCode: this.appVersions.get(d.serial) })
@@ -736,8 +741,28 @@ export class Runner {
     }
   }
 
+  /**
+   * Depois de cada caso: fecha o app (opção da fila) e, no emulador, apaga a tela. O projeto deixa o app aberto
+   * (dontStopAppOnReset) e um vídeo em loop seguiria decodificando e renderizando com o celular parado.
+   */
+  private async afterCase(ra: RunningAttempt): Promise<void> {
+    const q = this.queues.get(ra.queueId)
+    if (ra.deviceLost) return
+    try {
+      if (q?.options.closeAppAfter !== false) {
+        const meta = await this.appMeta(q?.appId)
+        if (meta) await this.ad.adb.forceStop(ra.serial, meta.package)
+        await this.ad.adb.keyevent(ra.serial, "HOME")
+      }
+      if (!ra.physical) await this.ad.adb.keyevent(ra.serial, "SLEEP")
+    } catch (e) {
+      this.log(`não consegui fechar o app/apagar a tela em ${ra.serial}: ${(e as Error).message}`)
+    }
+  }
+
   /** Antes de cada caso: fecha diálogo de erro na tela; se não fechar, o celular vai para manutenção. */
   private async preflight(serial: string, index: number): Promise<boolean> {
+    await this.ad.adb.keyevent(serial, "WAKEUP").catch(() => undefined) // a tela fica apagada entre os casos
     const focus = await this.ad.adb.focusedWindow(serial)
     if (!ERROR_DIALOG_RE.test(focus)) return true
     await this.ad.adb.closeSystemDialogs(serial)
@@ -873,6 +898,7 @@ export class Runner {
     this.running.delete(`${ra.queueId}/${ra.itemId}`)
     this.updateQueue(ra.queueId, (cur) => applyResult(cur, ra.itemId, ra.n, result, finishedAt))
     this.log(`■ ${ra.queueId}/${ra.itemId} em ${ra.serial}: ${result.status}${result.message ? ` — ${result.message.split("\n")[0].slice(0, 160)}` : ""}`)
+    await this.afterCase(ra)
     const d = this.devices.get(ra.serial)
     if (d && d.state === "busy") this.devices.set(ra.serial, { ...d, state: "ready", currentItemId: undefined, currentQueueId: undefined, currentTestName: undefined })
     if (result.status === "infra_error" && !ra.deviceLost) {

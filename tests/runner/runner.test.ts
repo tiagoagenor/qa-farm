@@ -6,6 +6,7 @@ import { accountOverlaps, deviceOverlaps, peakConcurrency } from "@/core/overlap
 import { TERMINAL_ITEM_STATUSES } from "@/core/queue-logic"
 import { readJson, writeJsonAtomic } from "@/core/store"
 import { DevicesStateSchema, type Queue, RunnerStateSchema } from "@/core/types"
+import { readWorld } from "@/server/fake-world"
 
 import { type Harness, makeHarness, queueInput } from "./harness"
 
@@ -463,6 +464,51 @@ describe("runner (modo fake)", () => {
 
     // Assert
     expect(running).toHaveLength(1)
+  })
+
+  it("ao fim do caso o app é fechado e a tela do emulador apagada", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+    const qid = (await h.command({ type: "create_queue", input: queueInput(ids) })).data!.queueId as string
+
+    // Act
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+
+    // Assert
+    const d = (await readWorld(h.dataDir)).devices.find((x) => x.serial === "emulator-5554")!
+    expect([d.forceStops, d.screen, d.lockDisabled]).toEqual([["com.exemplo.App.hml"], "off", true])
+  })
+
+  it("fila com a opção desligada deixa o app aberto ao fim do caso", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+    const input = { ...queueInput(ids), closeAppAfter: false }
+    const qid = (await h.command({ type: "create_queue", input })).data!.queueId as string
+
+    // Act
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+
+    // Assert
+    const d = (await readWorld(h.dataDir)).devices.find((x) => x.serial === "emulator-5554")!
+    expect([d.forceStops ?? [], liveQueue(qid)!.options.closeAppAfter]).toEqual([[], false])
+  })
+
+  it("a tela do emulador acende antes do caso começar", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    await h.tickUntil(async () => (await h.readyCount()) >= 1 || undefined)
+    const asleep = (await readWorld(h.dataDir)).devices[0].screen
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_05-Caso-SLOW-PASS")
+
+    // Act
+    await h.command({ type: "create_queue", input: queueInput(ids) })
+    await h.tickUntil(() => h.runner.snapshotForTests().running[0])
+
+    // Assert
+    const d = (await readWorld(h.dataDir)).devices[0]
+    expect([asleep, d.screen]).toEqual(["off", "on"])
   })
 
   it("a massa usada no caso fica registrada na tentativa (conta e dados gerados)", async () => {

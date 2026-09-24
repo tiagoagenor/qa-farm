@@ -14,6 +14,12 @@ export interface Adb {
   /** Fecha diálogos do sistema (inclusive ANR/"parou de responder"). */
   closeSystemDialogs(serial: string): Promise<void>
   putGlobalSetting(serial: string, key: string, value: string): Promise<void>
+  /** Fecha o app por completo (am force-stop). */
+  forceStop(serial: string, pkg: string): Promise<void>
+  /** Tecla: HOME, SLEEP (apaga a tela), WAKEUP (acende). */
+  keyevent(serial: string, key: "HOME" | "SLEEP" | "WAKEUP"): Promise<void>
+  /** Sem tela de bloqueio: acender a tela volta direto para o que estava aberto. */
+  disableLockscreen(serial: string): Promise<void>
 }
 
 export function realAdb(cfg: Config): Adb {
@@ -49,6 +55,16 @@ export function realAdb(cfg: Config): Adb {
     },
     async putGlobalSetting(serial, key, value) {
       await run(adb, ["-s", serial, "shell", "settings", "put", "global", key, value], { timeoutMs: 15_000 })
+    },
+    async forceStop(serial, pkg) {
+      await run(adb, ["-s", serial, "shell", "am", "force-stop", pkg], { timeoutMs: 15_000 })
+    },
+    async keyevent(serial, key) {
+      const args = key === "WAKEUP" ? "input keyevent KEYCODE_WAKEUP; wm dismiss-keyguard" : `input keyevent KEYCODE_${key}`
+      await run(adb, ["-s", serial, "shell", args], { timeoutMs: 15_000 })
+    },
+    async disableLockscreen(serial) {
+      await run(adb, ["-s", serial, "shell", "locksettings", "set-disabled", "true"], { timeoutMs: 15_000 })
     },
   }
 }
@@ -97,6 +113,24 @@ export function fakeAdb(cfg: Config): Adb {
       await updateWorld(dir, (w) => {
         const d = w.devices.find((x) => x.serial === serial)
         if (d) d.settings = { ...d.settings, [key]: value }
+      })
+    },
+    async forceStop(serial, pkg) {
+      await updateWorld(dir, (w) => {
+        const d = w.devices.find((x) => x.serial === serial)
+        if (d) d.forceStops = [...(d.forceStops ?? []), pkg]
+      })
+    },
+    async keyevent(serial, key) {
+      await updateWorld(dir, (w) => {
+        const d = w.devices.find((x) => x.serial === serial)
+        if (d && key !== "HOME") d.screen = key === "SLEEP" ? "off" : "on"
+      })
+    },
+    async disableLockscreen(serial) {
+      await updateWorld(dir, (w) => {
+        const d = w.devices.find((x) => x.serial === serial)
+        if (d) d.lockDisabled = true
       })
     },
   }

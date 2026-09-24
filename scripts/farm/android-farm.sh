@@ -29,14 +29,16 @@ fi
 API="${API:-33}"                    # nível de API Android (33 = Android 13; 34 força RAM mínima de 2560 MB)
 VARIANT="${VARIANT:-google_apis}"   # google_apis | default | google_apis_playstore
 RAM_MB="${RAM_MB:-2048}"            # memória por celular
-OVERHEAD_MB="${OVERHEAD_MB:-2300}"  # RAM extra que o emulador usa no host no pico (tela 1080x2400 rodando teste: ~4,3 GB no total)
+OVERHEAD_MB="${OVERHEAD_MB:-1900}"  # RAM extra que o emulador usa no host no pico (renderizador de tela + buffers)
 OOM_ADJ="${OOM_ADJ:-800}"           # sem memória, o kernel mata um emulador antes do sistema/ssh/painel (0..1000)
 SWAP_MB="${SWAP_MB:-0}"             # swap em disco dentro de cada celular (/data/swapfile); 0 = sem swap (padrão)
 CORES="${CORES:-2}"                 # vCPUs por celular
 DATA_SIZE="${DATA_SIZE:-4G}"        # armazenamento interno
-LCD_WIDTH="${LCD_WIDTH:-1080}"      # tela (padrão = Pixel 6: 1080x2400 @ 420 dpi)
-LCD_HEIGHT="${LCD_HEIGHT:-2400}"    #   para voltar à tela antiga: LCD_WIDTH=720 LCD_HEIGHT=1280 LCD_DENSITY=320
-LCD_DENSITY="${LCD_DENSITY:-420}"
+LCD_WIDTH="${LCD_WIDTH:-720}"       # tela 720x1920 @ 320 dpi: alta o bastante para o botão de login aparecer,
+LCD_HEIGHT="${LCD_HEIGHT:-1920}"    #   leve o bastante para 12 emuladores (1080x2400 usava ~5 GB por emulador)
+LCD_DENSITY="${LCD_DENSITY:-320}"
+EMU_CPU_QUOTA="${EMU_CPU_QUOTA:-250%}"  # limite de CPU por emulador (systemd --user scope; vazio = sem limite)
+EMU_MEM_MAX="${EMU_MEM_MAX:-5G}"        # limite de memória por emulador: estourou, só ele cai (vazio = sem limite)
 PREFIX="${PREFIX:-farm}"            # nome dos AVDs: farm-01, farm-02 ...
 BASE_PORT=5554                      # celular i usa console 5554+2(i-1), adb +1
 EXPOSE_BASE="${EXPOSE_BASE:-7000}"  # porta externa (LAN) do celular i = 7000+i
@@ -88,6 +90,7 @@ Opções:
   -s, --swap MB         Swap em disco por celular (padrão: $SWAP_MB = sem swap)
   -c, --cores N         vCPUs por celular (padrão: $CORES)
                         Tela: LCD_WIDTH x LCD_HEIGHT @ LCD_DENSITY dpi (padrão: ${LCD_WIDTH}x${LCD_HEIGHT} @ $LCD_DENSITY)
+                        Limite por emulador: EMU_CPU_QUOTA=$EMU_CPU_QUOTA EMU_MEM_MAX=$EMU_MEM_MAX
   -a, --api N           Nível da API Android (padrão: $API)
       --variant V       google_apis | default | google_apis_playstore (padrão: $VARIANT)
       --cold            Boot a frio (ignora snapshot quickboot)
@@ -96,7 +99,8 @@ Opções:
       --gui             Abre janela (precisa de display; padrão é headless)
       --no-tune         Não aplica ajustes de teste (animações off, tela sempre ligada)
 
-Variáveis de ambiente: FARM_HOME, ANDROID_SDK_ROOT, BOOT_TIMEOUT, STAGGER, PREFIX, LCD_WIDTH, LCD_HEIGHT, LCD_DENSITY
+Variáveis de ambiente: FARM_HOME, ANDROID_SDK_ROOT, BOOT_TIMEOUT, STAGGER, PREFIX, LCD_WIDTH, LCD_HEIGHT, LCD_DENSITY,
+                       EMU_CPU_QUOTA, EMU_MEM_MAX, OOM_ADJ
 EOF
 }
 
@@ -202,6 +206,12 @@ fastboot.forceColdBoot=no
 EOF
 }
 
+# systemd --user disponível? (o runner roda pelo cron: garante XDG_RUNTIME_DIR)
+user_scopes_ok() {
+  [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$(id -u)" ] && export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+  command -v systemd-run >/dev/null && systemd-run --user --scope --quiet true >/dev/null 2>&1
+}
+
 # ------------------------------------------------------------------ start ---
 launch_one() {  # $1 = índice
   local i=$1 name port log
@@ -216,8 +226,17 @@ launch_one() {  # $1 = índice
   (( WIPE )) && args+=(-wipe-data)
 
   # setsid: o emulador ganha sessão própria — sobrevive ao fim de quem o iniciou (terminal, runner, deploy)
+  # limite de CPU/memória por emulador (cgroup do systemd do usuário, sem sudo), quando disponível
+  local limit=()
+  if [ -n "$EMU_CPU_QUOTA$EMU_MEM_MAX" ] && user_scopes_ok; then
+    limit=(systemd-run --user --scope --quiet --unit="qafarm-$name-$(date +%s)")
+    [ -n "$EMU_CPU_QUOTA" ] && limit+=(-p "CPUQuota=$EMU_CPU_QUOTA")
+    [ -n "$EMU_MEM_MAX" ] && limit+=(-p "MemoryMax=$EMU_MEM_MAX")
+  elif [ -n "$EMU_CPU_QUOTA$EMU_MEM_MAX" ]; then
+    err "$name: sem systemd de usuário (ative: sudo loginctl enable-linger $USER) — iniciando SEM limite de CPU/memória"
+  fi
   # oom_score_adj alto: se a memória acabar, o kernel sacrifica um emulador (o painel religa) e o servidor segue de pé
-  setsid nohup sh -c 'echo "$0" > /proc/self/oom_score_adj 2>/dev/null; exec "$@"' "$OOM_ADJ" "$EMU" "${args[@]}" >"$log" 2>&1 < /dev/null &
+  setsid nohup "${limit[@]}" sh -c 'echo "$0" > /proc/self/oom_score_adj 2>/dev/null; exec "$@"' "$OOM_ADJ" "$EMU" "${args[@]}" >"$log" 2>&1 < /dev/null &
   echo $! > "$RUN_DIR/$name.pid"
   info "$name iniciando -> $(serial "$i") (adb 127.0.0.1:$(adb_port "$i"), log $log)"
 }

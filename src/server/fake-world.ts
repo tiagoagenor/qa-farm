@@ -16,6 +16,9 @@ const FakeDeviceSchema = z.object({
   installed: z.record(z.string(), z.number()),
   dialog: z.string().optional(), // janela de erro simulada (ex.: "Application Not Responding: com.android.systemui")
   settings: z.record(z.string(), z.string()).optional(),
+  forceStops: z.array(z.string()).optional(), // pacotes fechados com am force-stop
+  screen: z.enum(["on", "off"]).optional(),
+  lockDisabled: z.boolean().optional(),
 })
 export type FakeDevice = z.infer<typeof FakeDeviceSchema>
 

@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { getJson, sendCommand } from "@/lib/client"
 import { defaultQueueName } from "@/lib/queue-name"
 
@@ -32,6 +33,7 @@ export function CreateQueueDialog({
   const [env, setEnv] = useState<Env>("hml")
   const [timeoutMin, setTimeoutMin] = useState("15")
   const [retries, setRetries] = useState("0")
+  const [closeAppAfter, setCloseAppAfter] = useState(true)
   const [sending, setSending] = useState(false)
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export function CreateQueueDialog({
     setSending(true)
     const res = await sendCommand({
       type: "create_queue",
-      input: { name: name.trim(), appId, env, timeoutSec, retries: Number(retries), testIds },
+      input: { name: name.trim(), appId, env, timeoutSec, retries: Number(retries), closeAppAfter, testIds },
     })
     setSending(false)
     if (res?.ok && res.data?.queueId) {
@@ -142,6 +144,15 @@ export function CreateQueueDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div className="flex items-start justify-between gap-4 rounded-md border p-3">
+            <div className="grid gap-1">
+              <Label htmlFor="q-close-app">Fechar o app ao terminar cada caso</Label>
+              <p className="text-muted-foreground text-xs">
+                Evita que o app fique aberto (tocando vídeo) no celular parado, gastando CPU e memória do servidor.
+              </p>
+            </div>
+            <Switch id="q-close-app" checked={closeAppAfter} onCheckedChange={setCloseAppAfter} data-testid="queue-close-app" />
           </div>
         </div>
         <DialogFooter>

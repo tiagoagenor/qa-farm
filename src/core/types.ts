@@ -112,6 +112,8 @@ export type QueueStatus = z.infer<typeof QueueStatusSchema>
 export const QueueOptionsSchema = z.object({
   timeoutSec: z.number().int().min(10).max(24 * 3600),
   retries: z.number().int().min(0).max(5),
+  /** fecha o app (force-stop) ao fim de cada caso — o app deixado aberto segue tocando vídeo e gastando CPU */
+  closeAppAfter: z.boolean().optional(), // ausente = true
 })
 export type QueueOptions = z.infer<typeof QueueOptionsSchema>
 
@@ -196,6 +198,7 @@ export const CreateQueueInputSchema = z.object({
   env: EnvSchema,
   timeoutSec: z.number().int().min(10).max(24 * 3600),
   retries: z.number().int().min(0).max(5),
+  closeAppAfter: z.boolean().optional(), // ausente = true
   testIds: z.array(z.string()).min(1).max(5000),
 })
 export type CreateQueueInput = z.infer<typeof CreateQueueInputSchema>
