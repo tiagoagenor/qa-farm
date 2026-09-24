@@ -18,7 +18,8 @@ if [ ! -f .env ]; then
   echo "Criado .env (senha do painel: $PASS)"
 fi
 
-npm ci --no-audit --no-fund
+# npm ci exige lock idêntico; o npm do Mac omite deps opcionais WASM do Linux (@emnapi) → cai para npm install
+npm ci --no-audit --no-fund || { npm install --no-audit --no-fund && git checkout -- package-lock.json; }
 npm run build
 chmod +x scripts/ops/*.sh scripts/farm/*.sh
 
