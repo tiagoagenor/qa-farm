@@ -2,31 +2,34 @@ import type { CatalogEntry } from "@/core/types"
 
 // Árvore do catálogo igual à estrutura do projeto: pastas → arquivo .robot → casos.
 
-export type TreeRow =
+/** O mínimo que a árvore precisa: serve para casos do catálogo e itens de uma fila. */
+export type TreeEntry = Pick<CatalogEntry, "id" | "folder" | "file" | "line">
+
+export type TreeRow<E extends TreeEntry = CatalogEntry> =
   | { kind: "folder"; key: string; name: string; depth: number; ids: string[] }
   | { kind: "file"; key: string; name: string; depth: number; ids: string[] }
-  | { kind: "test"; key: string; entry: CatalogEntry; depth: number }
+  | { kind: "test"; key: string; entry: E; depth: number }
 
-interface Folder {
+interface Folder<E extends TreeEntry> {
   name: string
   path: string
-  folders: Map<string, Folder>
-  files: Map<string, CatalogEntry[]>
+  folders: Map<string, Folder<E>>
+  files: Map<string, E[]>
 }
 
 const ROOT = "scenarios"
 
-function newFolder(name: string, path: string): Folder {
+function newFolder<E extends TreeEntry>(name: string, path: string): Folder<E> {
   return { name, path, folders: new Map(), files: new Map() }
 }
 
-function build(entries: CatalogEntry[]): Folder {
-  const root = newFolder(ROOT, ROOT)
+function build<E extends TreeEntry>(entries: E[]): Folder<E> {
+  const root = newFolder<E>(ROOT, ROOT)
   for (const e of entries) {
     const parts = e.folder.split("/").slice(1) // sem o "scenarios"
     let cur = root
     for (const p of parts) {
-      if (!cur.folders.has(p)) cur.folders.set(p, newFolder(p, `${cur.path}/${p}`))
+      if (!cur.folders.has(p)) cur.folders.set(p, newFolder<E>(p, `${cur.path}/${p}`))
       cur = cur.folders.get(p)!
     }
     const list = cur.files.get(e.file) ?? []
@@ -36,7 +39,7 @@ function build(entries: CatalogEntry[]): Folder {
   return root
 }
 
-function allIds(f: Folder): string[] {
+function allIds<E extends TreeEntry>(f: Folder<E>): string[] {
   return [...[...f.folders.values()].flatMap(allIds), ...[...f.files.values()].flat().map((e) => e.id)]
 }
 
@@ -47,9 +50,9 @@ const baseName = (file: string) => file.slice(file.lastIndexOf("/") + 1)
  * Linhas visíveis da árvore. `expanded` guarda as chaves abertas (caminho da pasta ou do arquivo);
  * com `expandAll` (busca/filtro ativo) tudo aparece aberto. Casos mantêm a ordem do arquivo.
  */
-export function buildTreeRows(entries: CatalogEntry[], expanded: ReadonlySet<string>, expandAll = false): TreeRow[] {
-  const rows: TreeRow[] = []
-  const walk = (f: Folder, depth: number) => {
+export function buildTreeRows<E extends TreeEntry>(entries: E[], expanded: ReadonlySet<string>, expandAll = false): TreeRow<E>[] {
+  const rows: TreeRow<E>[] = []
+  const walk = (f: Folder<E>, depth: number) => {
     const subfolders = [...f.folders.values()].sort(byName)
     for (const sub of subfolders) {
       rows.push({ kind: "folder", key: sub.path, name: sub.name, depth, ids: allIds(sub) })
@@ -68,7 +71,7 @@ export function buildTreeRows(entries: CatalogEntry[], expanded: ReadonlySet<str
 }
 
 /** Todas as chaves de pastas e arquivos (para "expandir tudo"). */
-export function allGroupKeys(entries: CatalogEntry[]): string[] {
+export function allGroupKeys(entries: TreeEntry[]): string[] {
   const keys = new Set<string>()
   for (const e of entries) {
     const parts = e.folder.split("/")

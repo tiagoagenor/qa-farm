@@ -7,6 +7,8 @@ export function escapeRobotPattern(name: string): string {
 
 export interface RobotArgsInput {
   listenerPath: string
+  /** listener que grava massa.json (opcional) */
+  massaListenerPath?: string
   env: Env
   fileLongName: string
   outputDir: string
@@ -18,6 +20,7 @@ export function buildRobotArgs(i: RobotArgsInput): string[] {
   return [
     "--listener",
     i.listenerPath,
+    ...(i.massaListenerPath ? ["--listener", i.massaListenerPath] : []),
     "-v",
     "LOC:local",
     "-v",

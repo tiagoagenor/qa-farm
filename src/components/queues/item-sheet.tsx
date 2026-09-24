@@ -13,6 +13,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getJson } from "@/lib/client"
 import { durationBetween, formatDateTime, formatDuration, ITEM_STATUS, runFileUrl } from "@/lib/format"
 
+import { MassaView } from "./massa-view"
+
 const MAX_CONSOLE = 400_000
 
 function ConsoleView({ queueId, itemId, n, live }: { queueId: string; itemId: string; n: number; live: boolean }) {
@@ -127,6 +129,7 @@ export function ItemSheet({
                           <p className="text-xs">{formatDuration(durationBetween(current.startedAt, current.endedAt))}</p>
                         </div>
                       </div>
+                      <MassaView entries={current.massa} live={current.status === "running"} accounts={item.accounts} />
                       {current.message && (
                         <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3">
                           <p className="mb-1 text-xs font-medium">Erro</p>

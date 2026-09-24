@@ -4,6 +4,7 @@ import path from "node:path"
 
 import type { Config } from "@/core/config"
 import { newId } from "@/core/ids"
+import { parseMassa } from "@/core/massa"
 import { nextPhysicalIndex, parseAdbDevices, serialFromIndex } from "@/core/parsers/adb-devices"
 import { classifyRun } from "@/core/parsers/robot-output"
 import { dataPaths } from "@/core/paths"
@@ -784,6 +785,7 @@ export class Runner {
     })
     const args = buildRobotArgs({
       listenerPath: path.join(this.cfg.repoRoot, "scripts/robot/qafarm_listener.py"),
+      massaListenerPath: path.join(this.cfg.repoRoot, "scripts/robot/qafarm_massa.py"),
       env: q.env,
       fileLongName: it.fileLongName,
       outputDir: dir,
@@ -850,6 +852,8 @@ export class Runner {
       consoleText: consoleFull.slice(-64 * 1024),
       screenshots: files.filter((f) => /\.(png|jpe?g)$/i.test(f)).sort(),
     })
+    const massa = parseMassa(await read("massa.json"))
+    if (massa.length) result.massa = massa
     const finishedAt = new Date()
     await writeJsonAtomic(path.join(ra.dir, "result.json"), { ...result, finishedAt: finishedAt.toISOString() })
     // sessão órfã (timeout/cancelamento/robot morto) ocuparia as portas do celular no Appium compartilhado

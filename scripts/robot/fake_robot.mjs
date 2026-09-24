@@ -38,6 +38,17 @@ fs.writeFileSync(
   JSON.stringify({ serial, url: process.env.QAFARM_APPIUM_URL, sessionId: `fake-${Date.now()}`, caps: { udid: serial } }, null, 2),
 )
 
+// massa usada (o listener real grava massa.json ao ler a conta do DATA_MASSA)
+fs.writeFileSync(
+  path.join(outDir, "massa.json"),
+  JSON.stringify({
+    entries: [
+      { kind: "conta", account: "usuario_fake", var: "${usuario_data}", fields: { username: "fake@teste.com", password: "123456" } },
+      { kind: "gerado", source: "dataGenerator.Gerar Cpf", var: "${cpf}", value: "12345678909" },
+    ],
+  }),
+)
+
 const durationMs = Math.round((upper.includes("SLOW") ? 6000 : 1500) * speed)
 if (upper.includes("TIMEOUT")) {
   console.log("Caso travado (simulação de timeout)...")

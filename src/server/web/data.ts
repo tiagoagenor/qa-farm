@@ -4,6 +4,7 @@ import fsp from "node:fs/promises"
 import path from "node:path"
 
 import { newId } from "@/core/ids"
+import { parseMassa } from "@/core/massa"
 import { minTheoreticalSec, summarize } from "@/core/queue-logic"
 import { listJsonFiles, readJson, writeJsonAtomic } from "@/core/store"
 import {
@@ -83,6 +84,25 @@ export async function listQueues(): Promise<Queue[]> {
   const files = await listJsonFiles(ctx().p.queues)
   const all = await Promise.all(files.map((f) => readJson(f, QueueSchema.nullable(), null)))
   return all.filter((q): q is Queue => !!q).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+}
+
+/** Tentativas em andamento ainda não têm a massa na fila: lê o massa.json que o listener vai gravando. */
+export async function withLiveMassa(q: Queue): Promise<Queue> {
+  const items = await Promise.all(
+    q.items.map(async (it) => {
+      if (it.status !== "running") return it
+      const attempts = await Promise.all(
+        it.attempts.map(async (a) => {
+          if (a.endedAt) return a
+          const text = await fsp.readFile(path.join(ctx().p.runs, a.dir, "massa.json"), "utf8").catch(() => undefined)
+          const massa = parseMassa(text)
+          return massa.length ? { ...a, massa } : a
+        }),
+      )
+      return { ...it, attempts }
+    }),
+  )
+  return { ...q, items }
 }
 
 export function queueSummary(q: Queue, readyDevices: number) {

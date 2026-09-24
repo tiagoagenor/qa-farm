@@ -426,6 +426,24 @@ describe("runner (modo fake)", () => {
     expect(again.items.map((i) => i.name)).toEqual(["CT_LOGIN_03-Caso-FAIL"])
   })
 
+  it("a massa usada no caso fica registrada na tentativa (conta e dados gerados)", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+    const created = await h.command({ type: "create_queue", input: queueInput(ids) })
+    const qid = created.data!.queueId as string
+
+    // Act
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+
+    // Assert
+    const massa = liveQueue(qid)!.items[0].attempts[0].massa
+    expect(massa?.map((m) => (m.kind === "conta" ? `${m.account}:${m.fields.username}` : `${m.var}=${m.value}`))).toEqual([
+      "usuario_fake:fake@teste.com",
+      "${cpf}=12345678909",
+    ])
+  })
+
   it("celular que cai no meio do caso gera infra_error e o caso termina em outro celular", async () => {
     // Arrange
     h = await makeHarness({ emulators: 2 })

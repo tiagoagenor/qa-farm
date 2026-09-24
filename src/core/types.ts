@@ -69,6 +69,13 @@ export const ATTEMPT_STATUSES = [
 export const AttemptStatusSchema = z.enum(ATTEMPT_STATUSES)
 export type AttemptStatus = z.infer<typeof AttemptStatusSchema>
 
+/** Massa de dados usada no caso (gravada pelo listener scripts/robot/qafarm_massa.py em massa.json). */
+export const MassaEntrySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("conta"), account: z.string(), var: z.string(), fields: z.record(z.string(), z.string()) }),
+  z.object({ kind: z.literal("gerado"), source: z.string(), var: z.string(), value: z.string() }),
+])
+export type MassaEntry = z.infer<typeof MassaEntrySchema>
+
 export const AttemptSchema = z.object({
   n: z.number().int(),
   serial: z.string(),
@@ -80,6 +87,7 @@ export const AttemptSchema = z.object({
   dir: z.string(), // relativo a runs/
   pgid: z.number().int().optional(),
   screenshots: z.array(z.string()).optional(),
+  massa: z.array(MassaEntrySchema).optional(),
 })
 export type Attempt = z.infer<typeof AttemptSchema>
 
@@ -239,6 +247,7 @@ export const RunResultSchema = z.object({
   exitCode: z.number().nullable().optional(),
   screenshots: z.array(z.string()),
   hasOutputXml: z.boolean(),
+  massa: z.array(MassaEntrySchema).optional(),
   finishedAt: z.string().optional(), // término real da tentativa (usado ao recuperar após reinício)
 })
 export type RunResult = z.infer<typeof RunResultSchema>

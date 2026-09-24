@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { allGroupKeys, buildTreeRows, groupCheck, toggleGroup } from "@/lib/catalog-tree"
+import { allGroupKeys, buildTreeRows, groupCheck, toggleGroup, type TreeRow } from "@/lib/catalog-tree"
 import { entry } from "../helpers/builders"
 
 const E = [
@@ -10,7 +10,7 @@ const E = [
   entry("CT_LOGIN_01", { folder: "scenarios/login", file: "scenarios/login/login.robot", line: 8 }),
 ]
 
-const view = (rows: ReturnType<typeof buildTreeRows>) =>
+const view = (rows: TreeRow[]) =>
   rows.map((r) => `${"  ".repeat(r.depth)}${r.kind}:${r.kind === "test" ? r.entry.name : r.name}${r.kind === "test" ? "" : `(${r.ids.length})`}`)
 
 describe("buildTreeRows", () => {
