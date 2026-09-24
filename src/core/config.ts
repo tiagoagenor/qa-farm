@@ -22,6 +22,10 @@ export interface Config {
   appiumBasePort: number
   devicesPerAppium: number
   maxDevices: number
+  /** Não começa caso novo com menos que isso de memória livre (MB); protege o servidor de travar. */
+  minFreeMemMb: number
+  /** Memória que cada caso novo costuma consumir enquanto roda (MB), descontada ao começar vários de uma vez. */
+  caseMemMb: number
   installConcurrency: number
 }
 
@@ -58,6 +62,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     appiumBasePort: num(env.QAFARM_APPIUM_BASE_PORT, 4800),
     devicesPerAppium: Math.max(1, num(env.QAFARM_DEVICES_PER_APPIUM, 5)),
     maxDevices: num(env.QAFARM_MAX_DEVICES, 18),
+    minFreeMemMb: num(env.QAFARM_MIN_FREE_MEM_MB, 5000),
+    caseMemMb: num(env.QAFARM_CASE_MEM_MB, 1200),
     installConcurrency: num(env.QAFARM_INSTALL_CONCURRENCY, 3),
   }
 }

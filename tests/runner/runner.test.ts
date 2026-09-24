@@ -426,6 +426,45 @@ describe("runner (modo fake)", () => {
     expect(again.items.map((i) => i.name)).toEqual(["CT_LOGIN_03-Caso-FAIL"])
   })
 
+  it("com pouca memória livre no servidor o caso espera na fila e começa quando a memória volta", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 2 })
+    await h.tickUntil(async () => (await h.readyCount()) >= 2 || undefined)
+    await h.world((w) => {
+      w.memAvailableMb = 3000
+    })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+    const qid = (await h.command({ type: "create_queue", input: queueInput(ids) })).data!.queueId as string
+    for (let i = 0; i < 3; i++) await h.runner.tick()
+    const waiting = liveQueue(qid)!.items[0].status
+
+    // Act
+    await h.world((w) => {
+      w.memAvailableMb = 64_000
+    })
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+
+    // Assert
+    expect([waiting, liveQueue(qid)!.items[0].status]).toEqual(["queued", "passed"])
+  })
+
+  it("com memória para um caso só, a rodada começa um caso e não vários de uma vez", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 3 })
+    await h.tickUntil(async () => (await h.readyCount()) >= 3 || undefined)
+    await h.world((w) => {
+      w.memAvailableMb = 6000
+    })
+    const ids = await h.catalogIds((n) => ["CT_LOGIN_05-Caso-SLOW-PASS", "CT_PIX_03-Caso-SLOW-PASS", "CT_TED_01-Caso-SLOW-PASS"].includes(n))
+
+    // Act
+    await h.command({ type: "create_queue", input: queueInput(ids) }) // o mesmo tick já distribui os casos
+    const running = h.runner.snapshotForTests().running
+
+    // Assert
+    expect(running).toHaveLength(1)
+  })
+
   it("a massa usada no caso fica registrada na tentativa (conta e dados gerados)", async () => {
     // Arrange
     h = await makeHarness({ emulators: 1 })

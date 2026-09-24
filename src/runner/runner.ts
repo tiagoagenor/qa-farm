@@ -75,6 +75,7 @@ export class Runner {
   private farmJob?: { command: string; startedAt: string }
   private desired = 0
   private lastDesiredAttempt = 0
+  private lastLowMemLog = 0
   private lastDeviceRefresh = 0
   private adbRaw = ""
   private catalog: Catalog | null = null
@@ -718,10 +719,20 @@ export class Runner {
       const it = this.queues.get(r.queueId)?.items.find((i) => i.id === r.itemId)
       return { queueId: r.queueId, itemId: r.itemId, serial: r.serial, accounts: it?.accounts ?? [] }
     })
+    let memMb = await this.ad.farm.memAvailableMb()
     for (const a of schedule(queues, free, running)) {
+      // sem memória livre, o caso espera na fila: com emuladores rodando teste o servidor pode travar (OOM)
+      if (memMb < this.cfg.minFreeMemMb) {
+        if (Date.now() - this.lastLowMemLog > 60_000) {
+          this.lastLowMemLog = Date.now()
+          this.log(`memória livre baixa (${memMb} MB < ${this.cfg.minFreeMemMb} MB): novos casos aguardam`)
+        }
+        break
+      }
       const dev = free.find((f) => f.serial === a.serial)!
       if (!(await this.preflight(a.serial, dev.index))) continue // caso continua na fila para outro celular
       await this.startAttempt(a, dev.index)
+      memMb -= this.cfg.caseMemMb
     }
   }
 

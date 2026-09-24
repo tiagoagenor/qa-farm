@@ -29,7 +29,8 @@ fi
 API="${API:-33}"                    # nível de API Android (33 = Android 13; 34 força RAM mínima de 2560 MB)
 VARIANT="${VARIANT:-google_apis}"   # google_apis | default | google_apis_playstore
 RAM_MB="${RAM_MB:-2048}"            # memória por celular
-OVERHEAD_MB="${OVERHEAD_MB:-1200}"  # RAM extra que o processo do emulador usa no host
+OVERHEAD_MB="${OVERHEAD_MB:-2300}"  # RAM extra que o emulador usa no host no pico (tela 1080x2400 rodando teste: ~4,3 GB no total)
+OOM_ADJ="${OOM_ADJ:-800}"           # sem memória, o kernel mata um emulador antes do sistema/ssh/painel (0..1000)
 SWAP_MB="${SWAP_MB:-0}"             # swap em disco dentro de cada celular (/data/swapfile); 0 = sem swap (padrão)
 CORES="${CORES:-2}"                 # vCPUs por celular
 DATA_SIZE="${DATA_SIZE:-4G}"        # armazenamento interno
@@ -130,7 +131,7 @@ check_prereqs() {
 }
 
 check_capacity() {
-  local want_mb=$(( COUNT * (RAM_MB + OVERHEAD_MB) ))   # overhead medido: ~1,1 GB por emulador
+  local want_mb=$(( COUNT * (RAM_MB + OVERHEAD_MB) ))   # overhead medido no pico: ~2,3 GB por emulador
   local avail_mb; avail_mb=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
   local already; already=$(running_indexes | wc -l)
   if (( want_mb > avail_mb + already * (RAM_MB + OVERHEAD_MB) )); then
@@ -215,7 +216,8 @@ launch_one() {  # $1 = índice
   (( WIPE )) && args+=(-wipe-data)
 
   # setsid: o emulador ganha sessão própria — sobrevive ao fim de quem o iniciou (terminal, runner, deploy)
-  setsid nohup "$EMU" "${args[@]}" >"$log" 2>&1 < /dev/null &
+  # oom_score_adj alto: se a memória acabar, o kernel sacrifica um emulador (o painel religa) e o servidor segue de pé
+  setsid nohup sh -c 'echo "$0" > /proc/self/oom_score_adj 2>/dev/null; exec "$@"' "$OOM_ADJ" "$EMU" "${args[@]}" >"$log" 2>&1 < /dev/null &
   echo $! > "$RUN_DIR/$name.pid"
   info "$name iniciando -> $(serial "$i") (adb 127.0.0.1:$(adb_port "$i"), log $log)"
 }

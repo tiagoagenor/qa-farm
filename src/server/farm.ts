@@ -16,6 +16,8 @@ export interface Farm {
   exec(op: FarmOp, logFile: string): Promise<{ ok: boolean; code: number | null }>
   /** PID do qemu de cada emulador ligado (índice → pid). */
   qemuPids(): Promise<Map<number, number>>
+  /** Memória disponível no servidor (MemAvailable do /proc/meminfo), em MB. */
+  memAvailableMb(): Promise<number>
 }
 
 export function describeOp(op: FarmOp): string {
@@ -96,6 +98,11 @@ export function realFarm(cfg: Config, timeoutMs = 20 * 60_000): Farm {
       }
       return out
     },
+    async memAvailableMb() {
+      const text = await fsp.readFile("/proc/meminfo", "utf8").catch(() => "")
+      const kb = Number(/^MemAvailable:\s+(\d+)\s+kB/m.exec(text)?.[1])
+      return Number.isFinite(kb) && kb > 0 ? Math.floor(kb / 1024) : Number.POSITIVE_INFINITY // sem /proc (macOS): não limita
+    },
   }
 }
 
@@ -130,6 +137,9 @@ export function fakeFarm(cfg: Config): Farm {
         if (m && d.pid) out.set((Number(m[1]) - 5554) / 2 + 1, d.pid)
       }
       return out
+    },
+    async memAvailableMb() {
+      return (await readWorld(dir)).memAvailableMb ?? 64_000
     },
   }
 }
