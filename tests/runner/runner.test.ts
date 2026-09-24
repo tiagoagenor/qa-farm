@@ -431,7 +431,7 @@ describe("runner (modo fake)", () => {
     h = await makeHarness({ emulators: 2 })
     await h.tickUntil(async () => (await h.readyCount()) >= 2 || undefined)
     await h.world((w) => {
-      w.memAvailableMb = 3000
+      w.memAvailableMb = 1000
     })
     const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
     const qid = (await h.command({ type: "create_queue", input: queueInput(ids) })).data!.queueId as string
@@ -453,7 +453,7 @@ describe("runner (modo fake)", () => {
     h = await makeHarness({ emulators: 3 })
     await h.tickUntil(async () => (await h.readyCount()) >= 3 || undefined)
     await h.world((w) => {
-      w.memAvailableMb = 6000
+      w.memAvailableMb = 1600
     })
     const ids = await h.catalogIds((n) => ["CT_LOGIN_05-Caso-SLOW-PASS", "CT_PIX_03-Caso-SLOW-PASS", "CT_TED_01-Caso-SLOW-PASS"].includes(n))
 
