@@ -34,8 +34,8 @@ OOM_ADJ="${OOM_ADJ:-800}"           # sem memória, o kernel mata um emulador an
 SWAP_MB="${SWAP_MB:-0}"             # swap em disco dentro de cada celular (/data/swapfile); 0 = sem swap (padrão)
 CORES="${CORES:-2}"                 # vCPUs por celular
 DATA_SIZE="${DATA_SIZE:-4G}"        # armazenamento interno
-LCD_WIDTH="${LCD_WIDTH:-720}"       # tela 720x1920 @ 320 dpi: alta o bastante para o botão de login aparecer,
-LCD_HEIGHT="${LCD_HEIGHT:-1920}"    #   leve o bastante para 12 emuladores (1080x2400 usava ~5 GB por emulador)
+LCD_WIDTH="${LCD_WIDTH:-720}"       # tela 720x1600 @ 320 dpi (20:9): botão de login aparece (validado com CT_LOGIN_01)
+LCD_HEIGHT="${LCD_HEIGHT:-1600}"    #   e é leve para 12 emuladores (1080x2400 usava ~5 GB por emulador; 720x1280 esconde o botão)
 LCD_DENSITY="${LCD_DENSITY:-320}"
 EMU_CPU_QUOTA="${EMU_CPU_QUOTA:-250%}"  # limite de CPU por emulador (systemd --user scope; vazio = sem limite)
 EMU_MEM_MAX="${EMU_MEM_MAX:-5G}"        # limite de memória por emulador: estourou, só ele cai (vazio = sem limite)
