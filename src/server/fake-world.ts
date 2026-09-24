@@ -19,6 +19,7 @@ const FakeDeviceSchema = z.object({
   forceStops: z.array(z.string()).optional(), // pacotes fechados com am force-stop
   screen: z.enum(["on", "off"]).optional(),
   lockDisabled: z.boolean().optional(),
+  installs: z.number().optional(), // quantas instalações o painel fez
 })
 export type FakeDevice = z.infer<typeof FakeDeviceSchema>
 

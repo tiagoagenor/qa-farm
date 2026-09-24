@@ -3,11 +3,18 @@ import type { Config } from "@/core/config"
 import { run, runBuffer, sleep } from "./exec"
 import { FAKE_PNG, fakeAdbDevicesText, readWorld, updateWorld } from "./fake-world"
 
+/** Recusas que só desinstalando resolvem: versão instalada mais nova ou assinatura diferente. */
+export const INSTALL_NEEDS_UNINSTALL_RE = /INSTALL_FAILED_(VERSION_DOWNGRADE|UPDATE_INCOMPATIBLE)/
+
 export interface Adb {
   devicesRaw(): Promise<string>
   bootCompleted(serial: string): Promise<boolean>
   versionCode(serial: string, pkg: string): Promise<number | undefined>
-  install(serial: string, apk: string, pkg: string, versionCode: number): Promise<{ ok: boolean; output: string }>
+  /**
+   * Instala/atualiza o APK, inclusive versão mais antiga (-d). Se o Android ainda recusar (versão mais nova ou
+   * assinatura diferente) e `allowUninstall`, desinstala e instala de novo (apaga os dados do app — só emulador).
+   */
+  install(serial: string, apk: string, pkg: string, versionCode: number, opts?: { allowUninstall?: boolean }): Promise<{ ok: boolean; output: string }>
   screencap(serial: string): Promise<Buffer | null>
   /** Janela com foco (ex.: "Application Not Responding: com.android.systemui"). */
   focusedWindow(serial: string): Promise<string>
@@ -38,10 +45,17 @@ export function realAdb(cfg: Config): Adb {
       const m = /versionCode=(\d+)/.exec(r.stdout)
       return m ? Number(m[1]) : undefined
     },
-    async install(serial, apk) {
-      const r = await run(adb, ["-s", serial, "install", "-r", "-g", apk], { timeoutMs: 10 * 60_000 })
-      const output = (r.stdout + r.stderr).trim()
-      return { ok: r.code === 0 && /Success/.test(output), output }
+    async install(serial, apk, pkg, _versionCode, opts) {
+      const attempt = async () => {
+        const r = await run(adb, ["-s", serial, "install", "-r", "-d", "-g", apk], { timeoutMs: 10 * 60_000 })
+        const output = (r.stdout + r.stderr).trim()
+        return { ok: r.code === 0 && /Success/.test(output), output }
+      }
+      const first = await attempt()
+      if (first.ok || !opts?.allowUninstall || !INSTALL_NEEDS_UNINSTALL_RE.test(first.output)) return first
+      await run(adb, ["-s", serial, "uninstall", pkg], { timeoutMs: 2 * 60_000 })
+      const second = await attempt()
+      return { ok: second.ok, output: `${first.output}\n(desinstalado e instalado de novo)\n${second.output}` }
     },
     async screencap(serial) {
       return runBuffer(adb, ["-s", serial, "exec-out", "screencap", "-p"], 15_000)
@@ -82,18 +96,24 @@ export function fakeAdb(cfg: Config): Adb {
     async versionCode(serial, pkg) {
       return (await readWorld(dir)).devices.find((x) => x.serial === serial)?.installed[pkg]
     },
-    async install(serial, _apk, pkg, versionCode) {
+    async install(serial, _apk, pkg, versionCode, opts) {
       const w = await readWorld(dir)
       await sleep(w.installDelayMs)
-      let ok = false
+      let output = "error: device not found"
       await updateWorld(dir, (world) => {
         const d = world.devices.find((x) => x.serial === serial)
-        if (d && d.adbState === "device") {
-          d.installed[pkg] = versionCode
-          ok = true
+        if (!d || d.adbState !== "device") return
+        // aparelho físico (build "user") não aceita -d: versão mais antiga só desinstalando
+        const current = d.installed[pkg]
+        if (d.kind === "physical" && current !== undefined && current > versionCode && !opts?.allowUninstall) {
+          output = "Failure [INSTALL_FAILED_VERSION_DOWNGRADE: Downgrade detected: Update version code is older than current]"
+          return
         }
+        d.installed[pkg] = versionCode
+        d.installs = (d.installs ?? 0) + 1
+        output = "Success"
       })
-      return { ok, output: ok ? "Success" : "error: device not found" }
+      return { ok: output === "Success", output }
     },
     async screencap(serial) {
       const d = (await readWorld(dir)).devices.find((x) => x.serial === serial)

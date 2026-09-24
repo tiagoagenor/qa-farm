@@ -31,6 +31,7 @@ import {
   RunResultSchema,
 } from "@/core/types"
 import type { Adapters } from "@/server/adapters"
+import { INSTALL_NEEDS_UNINSTALL_RE } from "@/server/adb"
 import { killGroup } from "@/server/exec"
 import type { FarmOp } from "@/server/farm"
 import { describeOp } from "@/server/farm"
@@ -55,6 +56,7 @@ interface RunningAttempt {
 }
 
 const DEVICE_REFRESH_MS = 2000
+const INSTALL_RETRY_MS = 3 * 60_000
 /** Janelas de erro do Android que bloqueiam a tela (ANR / app parou). */
 export const ERROR_DIALOG_RE = /Application Not Responding|Application Error|isn.t responding|has stopped|keeps stopping/i
 const DESIRED_RETRY_MS = 5 * 60_000
@@ -67,6 +69,8 @@ export class Runner {
   private devices = new Map<string, Device>()
   private appVersions = new Map<string, number | undefined>() // serial → versionCode instalado
   private installing = new Set<string>()
+  /** última falha de instalação por celular: não tenta de novo a cada ciclo (e mostra o motivo no cartão) */
+  private installFailures = new Map<string, { versionCode: number; at: number; note: string }>()
   private prepared = new Set<string>() // celulares já configurados para testes (diálogos de erro desligados)
   private physical = new Map<string, number>() // aparelhos físicos ativados: serial → índice fixo
   private maintenance = new Map<number, { since: string; reason: string }>()
@@ -572,8 +576,11 @@ export class Runner {
             }
             const vc = this.appVersions.get(d.serial)
             if (vc !== meta.versionCode) {
-              this.startInstall(d.serial, meta)
-              next.set(d.serial, { ...base, state: "installing", appVersionCode: vc, note: `Instalando ${meta.versionName} (${meta.versionCode})` })
+              const failed = this.installFailures.get(d.serial)
+              const recent = failed && failed.versionCode === meta.versionCode && Date.now() - failed.at < INSTALL_RETRY_MS
+              if (!recent) this.startInstall(d.serial, meta, isPhysical)
+              const note = recent ? failed.note : `Instalando ${meta.versionName} (${meta.versionCode})`
+              next.set(d.serial, { ...base, state: "installing", appVersionCode: vc, note })
               return
             }
           }
@@ -640,15 +647,25 @@ export class Runner {
     await writeJsonAtomic(this.p.devicesState, state)
   }
 
-  private startInstall(serial: string, meta: AppMeta): void {
+  private startInstall(serial: string, meta: AppMeta, physical: boolean): void {
     if (this.installing.has(serial) || this.installing.size >= this.cfg.installConcurrency) return
     this.installing.add(serial)
     const apk = this.p.appApk(meta.id)
     this.log(`instalando ${meta.package} ${meta.versionCode} em ${serial}`)
+    // emulador é descartável: se só desinstalando resolve (versão mais nova/assinatura), desinstala.
+    // Aparelho físico: nunca apaga os dados do app sozinho — avisa no cartão.
     void this.ad.adb
-      .install(serial, apk, meta.package, meta.versionCode)
+      .install(serial, apk, meta.package, meta.versionCode, { allowUninstall: !physical })
       .then(async (r) => {
-        if (!r.ok) this.log(`falha ao instalar em ${serial}: ${r.output.slice(-300)}`)
+        if (r.ok) this.installFailures.delete(serial)
+        else {
+          this.log(`falha ao instalar em ${serial}: ${r.output.slice(-300)}`)
+          const note =
+            physical && INSTALL_NEEDS_UNINSTALL_RE.test(r.output)
+              ? `O aparelho tem uma versão mais nova do app: desinstale o app nele para usar ${meta.versionName} (${meta.versionCode})`
+              : `Falha ao instalar ${meta.versionName} (${meta.versionCode}); nova tentativa em ${INSTALL_RETRY_MS / 60_000} min`
+          this.installFailures.set(serial, { versionCode: meta.versionCode, at: Date.now(), note })
+        }
         this.appVersions.set(serial, await this.ad.adb.versionCode(serial, meta.package))
       })
       .finally(() => this.installing.delete(serial))

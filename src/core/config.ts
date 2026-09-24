@@ -67,6 +67,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxDevices: num(env.QAFARM_MAX_DEVICES, 18),
     minFreeMemMb: num(env.QAFARM_MIN_FREE_MEM_MB, 1500),
     caseMemMb: num(env.QAFARM_CASE_MEM_MB, 150),
-    installConcurrency: num(env.QAFARM_INSTALL_CONCURRENCY, 3),
+    // troca de versão do APK: instala em até 5 celulares ao mesmo tempo (cada emulador usa os próprios núcleos)
+    installConcurrency: num(env.QAFARM_INSTALL_CONCURRENCY, 5),
   }
 }

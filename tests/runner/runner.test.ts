@@ -184,6 +184,63 @@ describe("runner (modo fake)", () => {
     expect((await readWorld(h.dataDir)).devices[0].settings).toBeUndefined()
   })
 
+  it("aparelho físico com versão mais nova do app: avisa para desinstalar e não fica tentando instalar sem parar", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 0, physical: ["FAKE-PHYSICAL-01"] })
+    await h.tickUntil(() => h.runner.snapshotForTests().devices.length === 1 || undefined)
+    await h.world((w) => {
+      w.devices[0].installed["com.exemplo.App.hml"] = 6000
+    })
+
+    // Act
+    await h.command({ type: "set_physical", serial: "FAKE-PHYSICAL-01", enabled: true })
+    const d = await h.tickUntil(() => {
+      const dev = h.runner.snapshotForTests().devices[0]
+      return dev?.note?.includes("desinstale") ? dev : undefined
+    })
+    for (let i = 0; i < 5; i++) await h.runner.tick()
+
+    // Assert
+    const tries = h.logs.filter((l) => l.startsWith("instalando") && l.endsWith("FAKE-PHYSICAL-01")).length
+    const world = await readWorld(h.dataDir)
+    expect([d.state, tries, world.devices[0].installed["com.exemplo.App.hml"]]).toEqual(["installing", 1, 6000])
+  })
+
+  it("novo APK é instalado em vários celulares ao mesmo tempo (até 5)", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 4 })
+    await h.tickUntil(async () => (await readWorld(h.dataDir)).devices.length === 4 || undefined)
+    await h.world((w) => {
+      w.installDelayMs = 1500
+      for (const d of w.devices) d.installed = {}
+    })
+
+    // Act
+    await h.tickUntil(() => h.logs.filter((l) => l.startsWith("instalando")).length >= 4 || undefined)
+
+    // Assert
+    const ready = h.runner.snapshotForTests().devices.filter((d) => d.state === "ready").length
+    expect(ready).toBe(0)
+  })
+
+  it("emulador com versão mais nova do app volta para a versão da fila", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    await h.tickUntil(async () => (await readWorld(h.dataDir)).devices.length === 1 || undefined)
+    await h.world((w) => {
+      w.devices[0].installed["com.exemplo.App.hml"] = 6000
+    })
+
+    // Act
+    const d = await h.tickUntil(() => {
+      const dev = h.runner.snapshotForTests().devices[0]
+      return dev?.state === "ready" ? dev : undefined
+    })
+
+    // Assert
+    expect(d.appVersionCode).toBe(5528)
+  })
+
   it("desativar o aparelho físico devolve ele para externo", async () => {
     // Arrange
     h = await makeHarness({ emulators: 0, physical: ["FAKE-PHYSICAL-01"] })
