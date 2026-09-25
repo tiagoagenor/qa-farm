@@ -31,6 +31,7 @@ async function main() {
     apkDir: path.join(cfg.dataDir, "apks"),
   })
   const stop = async () => {
+    setTimeout(() => process.exit(0), 3000).unref() // não fica pendurado esperando conexões
     await agent.close()
     process.exit(0)
   }

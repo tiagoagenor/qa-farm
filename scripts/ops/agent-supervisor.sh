@@ -40,10 +40,12 @@ start() {
 stop() {
   local pid; pid=$(cat "$PIDF" 2>/dev/null) || return 0
   [ -n "$pid" ] || return 0
-  # flock → node: mata o node (filho) e o flock, sem mexer no grupo (Appium/emuladores seguem)
-  pkill -TERM -P "$pid" 2>/dev/null; kill -TERM "$pid" 2>/dev/null
-  for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
-  pkill -KILL -P "$pid" 2>/dev/null; kill -KILL "$pid" 2>/dev/null
+  # flock → node: pega o pid do node ANTES (morto o flock, o node é adotado pelo init e escaparia do pkill -P);
+  # não mexe no grupo — Appium e emuladores seguem
+  local pids="$pid $(pgrep -P "$pid" 2>/dev/null | tr '\n' ' ')"
+  kill -TERM $pids 2>/dev/null
+  for _ in $(seq 1 20); do kill -0 $pids 2>/dev/null || break; sleep 0.5; done
+  kill -KILL $pids 2>/dev/null
   rm -f "$PIDF"
   log "agente parado"
 }

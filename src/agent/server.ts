@@ -254,7 +254,11 @@ export async function startAgent(o: AgentOptions): Promise<{ server: http.Server
     url: `http://${o.host ?? "127.0.0.1"}:${addr.port}`,
     close: async () => {
       clearInterval(metricsTimer)
-      await new Promise<void>((r) => server.close(() => r()))
+      // fecha também as conexões keep-alive do mestre: sem isso o agente "parado" seguia respondendo nelas
+      // e o mestre continuava vendo a máquina online
+      const closed = new Promise<void>((r) => server.close(() => r()))
+      server.closeAllConnections()
+      await closed
     },
   }
 }

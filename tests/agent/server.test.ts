@@ -159,4 +159,19 @@ describe("agente do worker", () => {
     // Assert
     expect([all.length > 0, none.length]).toEqual([true, 0])
   })
+
+  it("parar o agente fecha também as conexões já abertas (o mestre deixa de receber respostas)", async () => {
+    // Arrange
+    const { client } = await agent(1)
+    await client.health() // abre conexão keep-alive
+    const close = stop!
+    stop = null
+
+    // Act
+    await close()
+    const err = await client.health().catch((e) => e)
+
+    // Assert
+    expect(err).toBeInstanceOf(Error)
+  })
 })
