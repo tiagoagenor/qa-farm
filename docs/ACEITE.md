@@ -16,3 +16,28 @@ O script está em `scripts/ops/acceptance.ts` e grava as evidências em `~/qa-fa
 Seis problemas só apareceram rodando de verdade e foram corrigidos durante a aceitação (ver histórico de commits):
 diálogo de ANR do Android, emuladores derrubados ao reiniciar o runner, memória dos Appiums, subida duplicada de
 Appium, resultado perdido em corrida entre casos e lock da fazenda herdado pelos emuladores.
+
+## T6 — Multi-máquina e saúde das máquinas (25/09/2026)
+
+Mestre: server01 (12 emuladores). Worker: server02 (Xeon E5-2682 v4, 32 threads, 31 GB), cadastrado pela página
+Máquinas, agente instalado pelo painel (túnel SSH aberto pelo mestre; agente só em 127.0.0.1:7100).
+
+| Teste | Resultado |
+|---|---|
+| Saúde do mestre vs sistema | memória = `free -m` (8.461 × 8.477 MB); temperatura = `sensors` (38 °C; núcleos 30–34 °C) |
+| Swap cheio de páginas antigas (sem troca ativa) | só aviso — o freio não segura casos (ajuste após falso alarme) |
+| Cadastro + "Testar conexão" sem agente | "SSH ok · agente sem resposta" |
+| "Instalar agente" | online pelo túnel, mesmo commit do mestre, métricas ao vivo |
+| Ligar 1 e depois 5 emuladores no worker | 1: ~70 s de boot + APK pelo túnel; 5: prontos em ~3 min (instalação em paralelo) |
+| Fila na pasta de login (11 casos, mesma conta liberada) | casos alternados entre as duas máquinas; artefatos completos no mestre (output.xml, log.html, console, massa, prints) |
+| Caso de login válido forçado no worker | passou (211 s; no mestre 156–186 s) |
+| Agente do worker morto com caso rodando | offline em ~14 s → erro de infra → caso volta à fila e passa no mestre; emuladores do worker não foram reiniciados |
+| Cron religa o agente | worker volta online sozinho, 5 emuladores intactos |
+| `agent-supervisor.sh stop` (após correção) | agente para de verdade; mestre vê offline; volta com o cron |
+| Worker com 6 emuladores | 6,7 GB livres, 39 °C, saúde ok, 0 OOM → pool: 18 emuladores + físico |
+
+Problemas encontrados e corrigidos na integração real:
+1. `~/.appium` copiado do mestre tinha caminhos absolutos do outro usuário (registro do driver e link
+   `node_modules/appium`): sessões no worker falhavam em 1 s. O `worker-deploy.sh` agora ajusta isso sozinho.
+2. Agente "parado" seguia respondendo nas conexões keep-alive do mestre e o `stop` do supervisor deixava o node vivo.
+3. (testes simulados) worker fora do ar travava o fim do caso no mestre (limpeza do Appium sem tratamento de erro).
