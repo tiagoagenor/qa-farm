@@ -4,6 +4,7 @@ import path from "node:path"
 
 import type { Config } from "@/core/config"
 import { newId } from "@/core/ids"
+import { deviceKey, dispatchBudget, globalIndex, interleaveByMachine, parseDeviceKey, splitIndex } from "@/core/machines"
 import { evaluateHealth, type HealthResult, type HealthState } from "@/core/health"
 import { type HostSample, MetricsFileSchema, MetricsHistory } from "@/core/metrics"
 import { parseMassa } from "@/core/massa"
@@ -35,10 +36,15 @@ import {
 } from "@/core/types"
 import type { Adapters } from "@/server/adapters"
 import { INSTALL_NEEDS_UNINSTALL_RE } from "@/server/adb"
+import type { Adb } from "@/server/adb"
+import type { AppiumPool } from "@/server/appium"
 import { killGroup } from "@/server/exec"
 import type { FarmOp } from "@/server/farm"
 import { describeOp } from "@/server/farm"
 import type { Snapshot } from "@/server/snapshot"
+
+import { RemoteMachines } from "./remote"
+import { routedAdb, routedAppium } from "./routing"
 
 type Log = (msg: string) => void
 
@@ -48,6 +54,7 @@ interface RunningAttempt {
   n: number
   serial: string
   index: number
+  machineId?: string
   pgid: number
   dir: string
   qemuPid?: number
@@ -104,6 +111,11 @@ export class Runner {
   private appMetaCache = new Map<string, AppMeta | null>()
   private ticking = false
   private readonly startedAt = new Date().toISOString()
+  /** máquinas worker (server02…) e roteamento de adb/Appium para elas */
+  private readonly remote: RemoteMachines
+  private readonly adb: Adb
+  private readonly appium: AppiumPool
+  private lastStatusWrite = 0
 
   constructor(
     private readonly cfg: Config,
@@ -112,6 +124,28 @@ export class Runner {
     private readonly opts: { deviceRefreshMs?: number } = {},
   ) {
     this.p = dataPaths(cfg.dataDir)
+    this.remote = new RemoteMachines(cfg, this.p, log)
+    this.adb = routedAdb(ad.adb, this.remote)
+    this.appium = routedAppium(ad.appium, this.remote)
+    this.remote.onReboot = (id) => this.forgetMachine(id)
+    this.remote.onOpDone = (id, op) => {
+      const m = this.remote.get(id)
+      if (m && op.kind === "startOne") this.maintenance.delete(globalIndex(m.slot, op.index))
+      this.lastDeviceRefresh = 0
+    }
+  }
+
+  /** Worker reiniciou: versões instaladas e preparo dos celulares dele não valem mais. */
+  private forgetMachine(id: string): void {
+    const prefix = `${id}:`
+    for (const k of [...this.appVersions.keys()]) if (k.startsWith(prefix)) this.appVersions.delete(k)
+    for (const k of [...this.prepared]) if (k.startsWith(prefix)) this.prepared.delete(k)
+    const m = this.remote.get(id)
+    if (m) for (const i of [...this.maintenance.keys()]) if (splitIndex(i).slot === m.slot) this.maintenance.delete(i)
+  }
+
+  private async saveDesired(): Promise<void> {
+    await writeJsonAtomic(this.p.desired, { devices: this.desired, machines: this.remote.desiredMap() })
   }
 
   // ------------------------------------------------------------ início ---
@@ -124,7 +158,7 @@ export class Runner {
     for (const pgid of prev?.pgids ?? []) killGroup(pgid, "SIGKILL")
     this.activeAppId = prev?.activeAppId
     // 2) Appiums antigos (sessões presas) — sobem de novo sob demanda
-    await this.ad.appium.killStray()
+    await this.appium.killStray()
     // 3) filas: o que estava rodando volta para a fila
     const now = new Date().toISOString()
     for (const file of await listJsonFiles(this.p.queues)) {
@@ -161,7 +195,9 @@ export class Runner {
       this.queues.set(fixed.id, fixed)
       if (fixed !== original) this.persistQueue(fixed.id)
     }
-    this.desired = (await readJson(this.p.desired, DesiredSchema, { devices: 0 })).devices
+    const desired = await readJson(this.p.desired, DesiredSchema, { devices: 0 })
+    this.desired = desired.devices
+    await this.remote.load(desired.machines ?? {})
     this.physical = new Map(Object.entries((await readJson(this.p.physical, PhysicalStateSchema, { enabled: {} })).enabled))
     this.disabledEmulators = new Set((await readJson(this.p.emulatorsDisabled, EmulatorsDisabledSchema, { disabled: [] })).disabled)
     const saved = await readJson(this.p.metrics, MetricsFileSchema.nullable(), null)
@@ -179,16 +215,19 @@ export class Runner {
     this.ticking = true
     try {
       await this.processCommands()
+      await this.remote.poll()
       if (Date.now() - this.lastDeviceRefresh >= (this.opts.deviceRefreshMs ?? DEVICE_REFRESH_MS)) {
         await this.refreshDevices()
         this.lastDeviceRefresh = Date.now()
       }
       this.reconcileFarm()
       this.processFarmOps()
+      this.reconcileRemoteFarms()
       await this.reconcileOrphans()
       await this.collectMetrics()
       await this.dispatch()
       await this.writeRunnerState()
+      await this.writeMachinesStatus()
     } catch (e) {
       this.log(`erro no tick: ${(e as Error).stack ?? e}`)
     } finally {
@@ -197,6 +236,7 @@ export class Runner {
   }
 
   async shutdown(): Promise<void> {
+    this.remote.shutdown()
     await this.writeRunnerState()
     await Promise.all([...this.writeChains.values()])
   }
@@ -231,6 +271,13 @@ export class Runner {
     }
   }
 
+  private async writeMachinesStatus(): Promise<void> {
+    if (Date.now() - this.lastStatusWrite < 2000) return
+    this.lastStatusWrite = Date.now()
+    if (this.remote.machines().length === 0 && !fs.existsSync(this.p.machinesStatus)) return
+    await writeJsonAtomic(this.p.machinesStatus, { updatedAt: new Date().toISOString(), machines: this.remote.status() })
+  }
+
   private async writeMetrics(): Promise<void> {
     const h = this.health
     await writeJsonAtomic(this.p.metrics, {
@@ -244,6 +291,7 @@ export class Runner {
           history: this.metricsHistory.list(),
           health: h ? { level: h.level, alerts: h.alerts, brake: h.brake, blockStart: h.blockStart } : { level: "ok", alerts: [], brake: false, blockStart: false },
         },
+        ...this.remote.metricsEntries(),
       ],
     })
   }
@@ -481,19 +529,37 @@ export class Runner {
         }
       }
       case "start_devices": {
+        if (c.machineId && c.machineId !== this.cfg.machineId) {
+          const m = this.remote.get(c.machineId)
+          if (!m) return { ok: false, message: "Máquina não encontrada" }
+          if (c.count > m.maxDevices) return { ok: false, message: `${m.name} aceita no máximo ${m.maxDevices} emuladores` }
+          this.remote.setDesired(m.id, c.count)
+          this.remote.queueOp(m.id, { kind: "start", count: c.count })
+          await this.saveDesired()
+          return { ok: true, message: `Ligando ${c.count} celular(es) em ${m.name}` }
+        }
         this.desired = c.count
-        await writeJsonAtomic(this.p.desired, { devices: c.count })
+        await this.saveDesired()
         this.farmOps.push({ kind: "start", count: c.count })
         this.lastDesiredAttempt = Date.now()
         return { ok: true, message: `Ligando ${c.count} celular(es)` }
       }
       case "stop_all_devices": {
-        if (this.running.size > 0) return { ok: false, message: "Há casos em execução. Pause ou cancele as filas antes." }
+        if (c.machineId && c.machineId !== this.cfg.machineId) {
+          const m = this.remote.get(c.machineId)
+          if (!m) return { ok: false, message: "Máquina não encontrada" }
+          if ([...this.running.values()].some((r) => r.machineId === m.id)) return { ok: false, message: `Há casos rodando em ${m.name}. Aguarde ou cancele antes.` }
+          this.remote.setDesired(m.id, 0)
+          this.remote.queueOp(m.id, { kind: "stopAll" })
+          await this.saveDesired()
+          return { ok: true, message: `Desligando os celulares de ${m.name}` }
+        }
+        if ([...this.running.values()].some((r) => !r.machineId)) return { ok: false, message: "Há casos em execução. Pause ou cancele as filas antes." }
         this.desired = 0
-        await writeJsonAtomic(this.p.desired, { devices: 0 })
+        await this.saveDesired()
         this.farmOps = [{ kind: "stopAll" }]
         this.maintenance.clear()
-        await this.ad.appium.stopAll()
+        await this.appium.stopAll()
         this.appVersions.clear()
         return { ok: true, message: "Desligando todos os celulares" }
       }
@@ -525,7 +591,7 @@ export class Runner {
         return { ok: true, message: `${c.serial} desativado: não recebe mais casos` }
       }
       case "set_emulator_enabled": {
-        if (!/^emulator-\d+$/.test(c.serial)) return { ok: false, message: "Use esta opção só em emuladores" }
+        if (!/^([a-z0-9-]+:)?emulator-\d+$/.test(c.serial)) return { ok: false, message: "Use esta opção só em emuladores" }
         if (c.enabled) this.disabledEmulators.delete(c.serial)
         else this.disabledEmulators.add(c.serial)
         await writeJsonAtomic(this.p.emulatorsDisabled, { disabled: [...this.disabledEmulators].sort() })
@@ -538,9 +604,65 @@ export class Runner {
             : `${c.serial} desativado: ${busyNow ? "termina o caso atual e " : ""}não recebe mais casos`,
         }
       }
+      case "add_machine": {
+        if (c.directUrl && !this.cfg.fake) return { ok: false, message: "URL direta só no modo simulado" }
+        try {
+          const m = await this.remote.add({ id: c.id, name: c.name, host: c.host, sshUser: c.sshUser, sshPort: c.sshPort, maxDevices: c.maxDevices, directUrl: c.directUrl, token: c.token })
+          return { ok: true, message: `Máquina ${m.name} cadastrada (slot ${m.slot})`, data: { id: m.id, slot: m.slot } }
+        } catch (e) {
+          return { ok: false, message: (e as Error).message }
+        }
+      }
+      case "update_machine": {
+        try {
+          const { type: _t, id, ...patch } = c
+          const m = await this.remote.update(id, patch)
+          return { ok: true, message: `Máquina ${m.name} atualizada` }
+        } catch (e) {
+          return { ok: false, message: (e as Error).message }
+        }
+      }
+      case "remove_machine": {
+        if ([...this.running.values()].some((r) => r.machineId === c.id)) return { ok: false, message: "Há casos rodando nessa máquina. Desative e aguarde terminar." }
+        try {
+          await this.remote.remove(c.id)
+          await this.saveDesired()
+          return { ok: true, message: "Máquina removida (os emuladores dela continuam como estão)" }
+        } catch (e) {
+          return { ok: false, message: (e as Error).message }
+        }
+      }
+      case "set_machine_enabled": {
+        const busyThere = [...this.running.values()].some((r) => r.machineId === c.id)
+        try {
+          await this.remote.setEnabled(c.id, c.enabled, busyThere)
+        } catch (e) {
+          return { ok: false, message: (e as Error).message }
+        }
+        return {
+          ok: true,
+          message: c.enabled ? "Máquina ativada: volta a receber casos" : busyThere ? "Máquina drenando: termina os casos atuais e não recebe novos" : "Máquina desativada",
+        }
+      }
+      case "test_machine": {
+        return this.remote.test(c.id)
+      }
+      case "deploy_machine": {
+        return this.remote.deploy(c.id, this.cfg.repoRoot, (ok, out) => {
+          this.log(`agente em ${c.id}: ${ok ? "instalado" : "falhou"} — ${out.split("\n").slice(-3).join(" | ")}`)
+        })
+      }
+      case "rotate_machine_token": {
+        try {
+          await this.remote.rotateToken(c.id)
+          return { ok: true, message: "Token trocado. Use \"Instalar agente\" para levar o token novo ao worker." }
+        } catch (e) {
+          return { ok: false, message: (e as Error).message }
+        }
+      }
       case "restart_appiums": {
         if (this.running.size > 0) return { ok: false, message: "Há casos em execução. Pause ou cancele as filas antes." }
-        await this.ad.appium.stopAll()
+        await this.appium.stopAll()
         return { ok: true, message: "Appiums reiniciados" }
       }
       case "delete_app": {
@@ -571,18 +693,41 @@ export class Runner {
   // ------------------------------------------------------------- celulares ---
   private restartDevice(index: number, reason: string): void {
     if (this.maintenance.has(index)) return
+    const { slot, local } = splitIndex(index)
+    const m = slot ? this.remote.bySlot(slot) : undefined
+    if (slot && (!m || !this.remote.isReachable(m.id))) return // worker sem resposta: não mexe nos emuladores dele
     this.maintenance.set(index, { since: new Date().toISOString(), reason })
-    const serial = serialFromIndex(index)
+    const serial = m ? deviceKey(m.id, serialFromIndex(local)) : serialFromIndex(index)
     this.appVersions.delete(serial)
     this.prepared.delete(serial)
-    this.farmOps.push({ kind: "stopOne", index }, { kind: "startOne", index })
-    this.log(`manutenção farm-${index} (${reason})`)
+    if (m) this.remote.queueOp(m.id, { kind: "stopOne", index: local }, { kind: "startOne", index: local })
+    else this.farmOps.push({ kind: "stopOne", index }, { kind: "startOne", index })
+    this.log(`manutenção ${m ? `${m.id} · ` : ""}farm-${local} (${reason})`)
+  }
+
+  private reconcileRemoteFarms(): void {
+    this.remote.reconcileDesired(
+      (id) =>
+        new Set(
+          [...this.devices.values()].filter((d) => d.machineId === id && d.kind === "emulator" && d.index).map((d) => splitIndex(d.index!).local),
+        ),
+      (id, local) => {
+        const m = this.remote.get(id)
+        return !!m && this.maintenance.has(globalIndex(m.slot, local))
+      },
+    )
+    // desativada e sem casos rodando: termina de drenar
+    for (const m of this.remote.machines()) {
+      if (!m.enabled && ![...this.running.values()].some((r) => r.machineId === m.id)) this.remote.drained(m.id)
+    }
   }
 
   private async refreshDevices(): Promise<void> {
     this.adbRaw = await this.ad.adb.devicesRaw()
-    const parsed = parseAdbDevices(this.adbRaw)
+    const remoteDevices = this.remote.devices()
+    const parsed: Array<ReturnType<typeof parseAdbDevices>[number] & { machineId?: string }> = [...parseAdbDevices(this.adbRaw), ...remoteDevices]
     const qemu = await this.ad.farm.qemuPids()
+    for (const d of remoteDevices) if (d.globalIndex && d.qemuPid) qemu.set(d.globalIndex, d.qemuPid)
     const meta = await this.appMeta(this.activeAppId)
     const busyBySerial = new Map([...this.running.values()].map((r) => [r.serial, r]))
     const now = new Date().toISOString()
@@ -597,7 +742,7 @@ export class Runner {
         ra.deviceLost = true
         this.log(`celular ${ra.serial} caiu durante ${ra.queueId}/${ra.itemId}`)
         this.kill(ra)
-        if (!ra.physical) this.restartDevice(ra.index, "caiu durante um caso") // aparelho físico nunca é reiniciado
+        if (!ra.physical) this.restartDevice(ra.index, "caiu durante um caso") // aparelho físico nunca é reiniciado (e worker offline não)
       }
     }
 
@@ -608,13 +753,18 @@ export class Runner {
         kind: d.kind,
         adbState: d.adbState,
         index: d.index,
-        name: d.index ? `farm-${String(d.index).padStart(2, "0")}` : undefined,
+        name: d.index ? `${d.machineId ? `${d.machineId} · ` : ""}farm-${String(splitIndex(d.index).local).padStart(2, "0")}` : undefined,
+        machineId: d.machineId,
         model: d.model,
         state: "offline",
         qemuPid: d.index ? qemu.get(d.index) : undefined,
         updatedAt: now,
       }
       const isPhysical = d.kind === "physical"
+      if (isPhysical && d.machineId) {
+        next.set(d.serial, { ...base, state: "external", enabled: false, note: "Aparelho USB em worker ainda não é usado nos testes" })
+        continue
+      }
       if (isPhysical && !this.physical.has(d.serial)) {
         next.set(d.serial, { ...base, state: "external", enabled: false })
         continue
@@ -648,19 +798,19 @@ export class Runner {
       readyChecks.push(
         (async () => {
           const prev = this.devices.get(d.serial)
-          const booted = prev && (prev.state === "ready" || prev.state === "installing") ? true : await this.ad.adb.bootCompleted(d.serial)
+          const booted = prev && (prev.state === "ready" || prev.state === "installing") ? true : await this.adb.bootCompleted(d.serial)
           if (!booted) {
             next.set(d.serial, { ...base, state: "booting" })
             return
           }
-          await this.ad.appium.ensure(idx)
-          if (!(await this.ad.appium.isReady(idx))) {
+          await this.appium.ensure(idx)
+          if (!(await this.appium.isReady(idx))) {
             next.set(d.serial, { ...base, state: "installing", note: "Iniciando Appium" })
             return
           }
           if (meta) {
             if (!this.appVersions.has(d.serial)) {
-              this.appVersions.set(d.serial, await this.ad.adb.versionCode(d.serial, meta.package))
+              this.appVersions.set(d.serial, await this.adb.versionCode(d.serial, meta.package))
             }
             const vc = this.appVersions.get(d.serial)
             if (vc !== meta.versionCode) {
@@ -675,12 +825,12 @@ export class Runner {
           if (!this.prepared.has(d.serial)) {
             // ANR do System UI no boot deixa um diálogo na tela que bloqueia todos os casos daquele celular.
             // Aparelho físico: não mexemos nas configurações do sistema dele (só fechamos diálogos antes de cada caso).
-            if (!isPhysical) await this.ad.adb.putGlobalSetting(d.serial, "hide_error_dialogs", "1")
-            await this.ad.adb.closeSystemDialogs(d.serial)
+            if (!isPhysical) await this.adb.putGlobalSetting(d.serial, "hide_error_dialogs", "1")
+            await this.adb.closeSystemDialogs(d.serial)
             if (!isPhysical) {
               // sem tela de bloqueio + tela apagada enquanto espera caso: não gasta CPU desenhando a tela à toa
-              await this.ad.adb.disableLockscreen(d.serial)
-              await this.ad.adb.keyevent(d.serial, "SLEEP")
+              await this.adb.disableLockscreen(d.serial)
+              await this.adb.keyevent(d.serial, "SLEEP")
             }
             this.prepared.add(d.serial)
           }
@@ -695,6 +845,13 @@ export class Runner {
     for (const prev of this.devices.values()) {
       const idx = prev.index
       if (prev.kind !== "emulator" || !idx || next.has(prev.serial) || this.maintenance.has(idx)) continue
+      if (prev.machineId) {
+        // worker: só reinicia se a máquina está respondendo (sem resposta = problema de rede, não do emulador)
+        if (!this.remote.isReachable(prev.machineId) || splitIndex(idx).local > this.remote.desiredOf(prev.machineId)) continue
+        if (prev.state === "maintenance") continue
+        this.restartDevice(idx, "sumiu do adb")
+        continue
+      }
       if (stopping || idx > this.desired || prev.state === "maintenance") continue
       this.restartDevice(idx, "sumiu do adb")
     }
@@ -742,7 +899,7 @@ export class Runner {
     this.log(`instalando ${meta.package} ${meta.versionCode} em ${serial}`)
     // emulador é descartável: se só desinstalando resolve (versão mais nova/assinatura), desinstala.
     // Aparelho físico: nunca apaga os dados do app sozinho — avisa no cartão.
-    void this.ad.adb
+    void this.adb
       .install(serial, apk, meta.package, meta.versionCode, { allowUninstall: !physical })
       .then(async (r) => {
         if (r.ok) this.installFailures.delete(serial)
@@ -754,7 +911,7 @@ export class Runner {
               : `Falha ao instalar ${meta.versionName} (${meta.versionCode}); nova tentativa em ${INSTALL_RETRY_MS / 60_000} min`
           this.installFailures.set(serial, { versionCode: meta.versionCode, at: Date.now(), note })
         }
-        this.appVersions.set(serial, await this.ad.adb.versionCode(serial, meta.package))
+        this.appVersions.set(serial, await this.adb.versionCode(serial, meta.package))
       })
       .finally(() => this.installing.delete(serial))
   }
@@ -764,7 +921,7 @@ export class Runner {
     if (this.desired <= 0 || this.farmBusy || this.farmOps.length > 0) return
     if (this.health?.blockStart) return // disco quase cheio: não liga emuladores novos
     if (Date.now() - this.lastDesiredAttempt < DESIRED_RETRY_MS) return
-    const present = new Set([...this.devices.values()].filter((d) => d.kind === "emulator").map((d) => d.index))
+    const present = new Set([...this.devices.values()].filter((d) => d.kind === "emulator" && !d.machineId).map((d) => d.index))
     const missing = Array.from({ length: this.desired }, (_, k) => k + 1).filter((i) => !present.has(i) && !this.maintenance.has(i))
     if (missing.length === 0) return
     this.lastDesiredAttempt = Date.now()
@@ -823,23 +980,37 @@ export class Runner {
     await this.pickActiveApp()
     const free = [...this.devices.values()]
       .filter((d) => d.enabled !== false && (d.kind === "emulator" || d.enabled) && d.state === "ready" && d.index && ![...this.running.values()].some((r) => r.serial === d.serial))
-      .map((d) => ({ serial: d.serial, index: d.index! }))
+      .map((d) => ({ serial: d.serial, index: d.index!, machineId: d.machineId }))
     if (free.length === 0) return
     const queues = [...this.queues.values()].filter((q) => q.appId === this.activeAppId)
     const running = [...this.running.values()].map((r) => {
       const it = this.queues.get(r.queueId)?.items.find((i) => i.id === r.itemId)
       return { queueId: r.queueId, itemId: r.itemId, serial: r.serial, accounts: it?.accounts ?? [] }
     })
-    // saúde crítica (temperatura, swap trocando, CPU saturada): segura casos novos; os que estão rodando seguem
+    // orçamento por máquina: saúde crítica (temperatura, swap trocando, CPU saturada) segura casos novos NAQUELA
+    // máquina; os que estão rodando seguem. Worker também precisa estar online e com memória.
+    const budget = new Map<string, number>()
     if (this.health?.brake) {
+      budget.set("", 0)
       if (Date.now() - this.lastBrakeLog > 60_000) {
         this.lastBrakeLog = Date.now()
         this.log(`freio de saúde ativo (${this.health.alerts.filter((a) => a.level === "crit").map((a) => a.message).join("; ")}): novos casos aguardam`)
       }
-      return
     }
+    for (const m of this.remote.machines()) {
+      budget.set(
+        m.id,
+        dispatchBudget(
+          { online: this.remote.isOnline(m.id), memAvailableMb: this.remote.memAvailableMb(m.id), brake: this.remote.healthOf(m.id)?.brake ?? false },
+          this.cfg,
+        ),
+      )
+    }
+    const usable = interleaveByMachine(free.filter((f) => (budget.get(f.machineId ?? "") ?? Infinity) > 0))
+    if (usable.length === 0) return
+    // memória do MESTRE: o robot de todo caso (inclusive de celular remoto) roda aqui
     let memMb = await this.ad.farm.memAvailableMb()
-    for (const a of schedule(queues, free, running)) {
+    for (const a of schedule(queues, usable, running)) {
       // sem memória livre, o caso espera na fila: com emuladores rodando teste o servidor pode travar (OOM)
       if (memMb < this.cfg.minFreeMemMb) {
         if (Date.now() - this.lastLowMemLog > 60_000) {
@@ -848,10 +1019,13 @@ export class Runner {
         }
         break
       }
-      const dev = free.find((f) => f.serial === a.serial)!
+      const dev = usable.find((f) => f.serial === a.serial)!
+      const key = dev.machineId ?? ""
+      if ((budget.get(key) ?? Infinity) <= 0) continue
       if (!(await this.preflight(a.serial, dev.index))) continue // caso continua na fila para outro celular
-      await this.startAttempt(a, dev.index)
-      memMb -= this.cfg.caseMemMb
+      await this.startAttempt(a, dev.index, dev.machineId)
+      budget.set(key, (budget.get(key) ?? Infinity) - 1)
+      memMb -= dev.machineId ? this.cfg.robotMemMb : this.cfg.caseMemMb
     }
   }
 
@@ -865,10 +1039,10 @@ export class Runner {
     try {
       if (q?.options.closeAppAfter !== false) {
         const meta = await this.appMeta(q?.appId)
-        if (meta) await this.ad.adb.forceStop(ra.serial, meta.package)
-        await this.ad.adb.keyevent(ra.serial, "HOME")
+        if (meta) await this.adb.forceStop(ra.serial, meta.package)
+        await this.adb.keyevent(ra.serial, "HOME")
       }
-      if (!ra.physical) await this.ad.adb.keyevent(ra.serial, "SLEEP")
+      if (!ra.physical) await this.adb.keyevent(ra.serial, "SLEEP")
     } catch (e) {
       this.log(`não consegui fechar o app/apagar a tela em ${ra.serial}: ${(e as Error).message}`)
     }
@@ -876,11 +1050,17 @@ export class Runner {
 
   /** Antes de cada caso: fecha diálogo de erro na tela; se não fechar, o celular vai para manutenção. */
   private async preflight(serial: string, index: number): Promise<boolean> {
-    await this.ad.adb.keyevent(serial, "WAKEUP").catch(() => undefined) // a tela fica apagada entre os casos
-    const focus = await this.ad.adb.focusedWindow(serial)
+    await this.adb.keyevent(serial, "WAKEUP").catch(() => undefined) // a tela fica apagada entre os casos
+    let focus: string
+    try {
+      focus = await this.adb.focusedWindow(serial)
+    } catch (e) {
+      this.log(`celular ${serial} sem resposta antes do caso: ${(e as Error).message} — caso fica na fila`)
+      return false
+    }
     if (!ERROR_DIALOG_RE.test(focus)) return true
-    await this.ad.adb.closeSystemDialogs(serial)
-    const after = await this.ad.adb.focusedWindow(serial)
+    await this.adb.closeSystemDialogs(serial)
+    const after = await this.adb.focusedWindow(serial)
     if (!ERROR_DIALOG_RE.test(after)) {
       this.log(`diálogo de erro fechado em ${serial}: "${focus}"`)
       return true
@@ -896,7 +1076,7 @@ export class Runner {
     return false
   }
 
-  private async startAttempt(a: Assignment, index: number): Promise<void> {
+  private async startAttempt(a: Assignment, index: number, machineId?: string): Promise<void> {
     const q = this.queues.get(a.queueId)
     const it = q?.items.find((i) => i.id === a.itemId)
     const meta = await this.appMeta(q?.appId)
@@ -927,9 +1107,10 @@ export class Runner {
     }
     const env = buildRobotEnv(baseEnv, {
       AMBIENTE: q.env,
-      QAFARM_SERIAL: a.serial,
-      QAFARM_INDEX: String(index),
-      QAFARM_APPIUM_URL: this.ad.appium.url(index),
+      // celular de worker: serial e índice LOCAIS da máquina (o Appium roda lá) e a URL pelo túnel
+      QAFARM_SERIAL: machineId ? parseDeviceKey(a.serial, this.remote.ids()).serial : a.serial,
+      QAFARM_INDEX: String(splitIndex(index).local),
+      QAFARM_APPIUM_URL: this.appium.url(index),
       QAFARM_APP_PACKAGE: meta.package,
       QAFARM_APP_ACTIVITY: meta.launchableActivity,
     })
@@ -944,13 +1125,14 @@ export class Runner {
     const spawned = this.ad.robot.spawn({ args, env, cwd: snap.dir, consoleFile: path.join(dir, "console.log") })
     const startedAt = new Date().toISOString()
     const relDir = path.relative(this.p.runs, dir)
-    const qemuPid = (await this.ad.farm.qemuPids()).get(index)
+    const qemuPid = machineId ? this.devices.get(a.serial)?.qemuPid : (await this.ad.farm.qemuPids()).get(index)
     const ra: RunningAttempt = {
       queueId: q.id,
       itemId: it.id,
       n,
       serial: a.serial,
       index,
+      machineId,
       pgid: spawned.pid,
       dir,
       qemuPid,
@@ -965,7 +1147,7 @@ export class Runner {
       ...cur,
       items: cur.items.map((i) =>
         i.id === it.id
-          ? { ...i, status: "running", attempts: [...i.attempts, { n, serial: a.serial, startedAt, status: "running", dir: relDir, pgid: spawned.pid }] }
+          ? { ...i, status: "running", attempts: [...i.attempts, { n, serial: a.serial, startedAt, status: "running", dir: relDir, pgid: spawned.pid, machineId }] }
           : i,
       ),
     }))
@@ -1007,7 +1189,11 @@ export class Runner {
     const finishedAt = new Date()
     await writeJsonAtomic(path.join(ra.dir, "result.json"), { ...result, finishedAt: finishedAt.toISOString() })
     // sessão órfã (timeout/cancelamento/robot morto) ocuparia as portas do celular no Appium compartilhado
-    const removed = await this.ad.appium.cleanupSessions(ra.index, ra.serial)
+    // worker fora do ar não pode travar o fim do caso (o resultado precisa ser gravado de qualquer jeito)
+    const removed = await this.appium.cleanupSessions(ra.index, ra.serial).catch((e: Error) => {
+      this.log(`não consegui limpar as sessões do Appium de ${ra.serial}: ${e.message}`)
+      return 0
+    })
     if (removed) this.log(`${removed} sessão(ões) do Appium encerrada(s) para ${ra.serial}`)
     this.running.delete(`${ra.queueId}/${ra.itemId}`)
     this.updateQueue(ra.queueId, (cur) => applyResult(cur, ra.itemId, ra.n, result, finishedAt))

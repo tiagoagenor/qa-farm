@@ -90,7 +90,7 @@ export function realHostMetrics(): HostMetrics {
 export function fakeHostMetrics(cfg: Config): HostMetrics {
   return {
     async sample() {
-      const w = await readWorld(cfg.dataDir)
+      const w = await readWorld(cfg.dataDir, cfg.fakeScenario)
       const total = 64_000
       const avail = w.memAvailableMb ?? 48_000
       const cpu = w.cpuPct ?? 20

@@ -27,6 +27,8 @@ export function dataPaths(dataDir: string) {
     physical: path.join(dataDir, "state", "physical.json"),
     emulatorsDisabled: path.join(dataDir, "state", "emulators-disabled.json"),
     metrics: path.join(dataDir, "state", "metrics.json"),
+    machines: path.join(dataDir, "state", "machines.json"),
+    machinesStatus: path.join(dataDir, "state", "machines-status.json"),
     runnerLock: path.join(dataDir, "state", "runner.lock"),
     logs: path.join(dataDir, "logs"),
     appiumLog: (serial: string) => path.join(dataDir, "logs", `appium-${serial}.log`),

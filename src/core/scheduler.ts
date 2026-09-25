@@ -3,6 +3,8 @@ import type { Item, Queue } from "./types"
 export interface FreeDevice {
   serial: string
   index: number
+  /** máquina do celular (ausente = mestre) */
+  machineId?: string
 }
 
 export interface RunningItem {
@@ -38,7 +40,7 @@ function pendingByAccount(items: Item[]): Map<string, number> {
  * - nunca dois itens com conta em comum ao mesmo tempo (considerando os que já estão rodando),
  *   exceto em fila com `allowSameAccount`: lá os casos saem em sequência, na ordem da fila, para qualquer
  *   celular livre (cada caso faz o próprio login) — nenhum celular fica parado;
- * - nova tentativa prefere um celular onde o item ainda não rodou.
+ * - nova tentativa prefere um celular de OUTRA máquina e, depois, um celular onde o item ainda não rodou.
  */
 export function schedule(queues: Queue[], freeDevices: FreeDevice[], running: RunningItem[]): Assignment[] {
   const locked = new Set(running.flatMap((r) => r.accounts))
@@ -63,10 +65,9 @@ export function schedule(queues: Queue[], freeDevices: FreeDevice[], running: Ru
       if (!shared && it.accounts.some((a) => locked.has(a))) continue
 
       const used = new Set(it.attempts.map((a) => a.serial))
-      const idx = Math.max(
-        0,
-        free.findIndex((d) => !used.has(d.serial)),
-      )
+      const usedMachines = new Set(it.attempts.map((a) => a.machineId ?? ""))
+      const otherMachine = it.attempts.length ? free.findIndex((d) => !usedMachines.has(d.machineId ?? "")) : -1
+      const idx = otherMachine >= 0 ? otherMachine : Math.max(0, free.findIndex((d) => !used.has(d.serial)))
       const [dev] = free.splice(idx, 1)
       for (const a of it.accounts) locked.add(a)
       out.push({ queueId: q.id, itemId: it.id, serial: dev.serial })

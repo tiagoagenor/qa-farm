@@ -31,6 +31,10 @@ export interface Config {
   minFreeMemMb: number
   /** Memória que cada caso novo acrescenta enquanto roda (Robot + sessão Appium), descontada ao começar vários de uma vez. */
   caseMemMb: number
+  /** memória do MESTRE usada pelo processo robot de um caso em celular remoto */
+  robotMemMb: number
+  /** worker sem resposta há mais que isso = offline: casos dele viram erro de infra e voltam para a fila */
+  remoteOfflineMs: number
   installConcurrency: number
   /** nome desta máquina no painel (a mestre) */
   machineId: string
@@ -74,6 +78,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxDevices: num(env.QAFARM_MAX_DEVICES, 18),
     minFreeMemMb: num(env.QAFARM_MIN_FREE_MEM_MB, 1500),
     caseMemMb: num(env.QAFARM_CASE_MEM_MB, 150),
+    robotMemMb: num(env.QAFARM_ROBOT_MEM_MB, 120),
+    remoteOfflineMs: num(env.QAFARM_REMOTE_OFFLINE_MS, 15_000),
     // troca de versão do APK: instala em até 5 celulares ao mesmo tempo (cada emulador usa os próprios núcleos)
     installConcurrency: num(env.QAFARM_INSTALL_CONCURRENCY, 5),
     machineId: env.QAFARM_MACHINE_ID || os.hostname().split(".")[0] || "server01",

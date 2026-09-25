@@ -14,7 +14,7 @@ import { updateWorld } from "@/server/fake-world"
 export const REPO = path.resolve(__dirname, "../..")
 export const APP_ID = "app_20260924-100000_abcdef"
 
-export async function makeHarness(opts: { emulators?: number; physical?: string[]; ioDelayMs?: number } = {}) {
+export async function makeHarness(opts: { emulators?: number; physical?: string[]; ioDelayMs?: number; fakeSpeed?: number; remoteOfflineMs?: number } = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "qafarm-runner-"))
   const scenario = path.join(dataDir, "scenario.json")
   await fs.writeFile(
@@ -29,7 +29,8 @@ export async function makeHarness(opts: { emulators?: number; physical?: string[
   const cfg = loadConfig({
     HOME: os.homedir(),
     QAFARM_FAKE: "1",
-    QAFARM_FAKE_SPEED: "0.1",
+    QAFARM_FAKE_SPEED: String(opts.fakeSpeed ?? 0.1),
+    QAFARM_REMOTE_OFFLINE_MS: String(opts.remoteOfflineMs ?? 15_000),
     QAFARM_FAKE_SCENARIO: scenario,
     QAFARM_DATA_DIR: dataDir,
     QAFARM_REPO_ROOT: REPO,

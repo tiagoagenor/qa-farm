@@ -85,6 +85,7 @@ export const AttemptSchema = z.object({
   message: z.string().optional(),
   teardownMessage: z.string().optional(),
   dir: z.string(), // relativo a runs/
+  machineId: z.string().optional(), // máquina do celular (ausente = mestre)
   pgid: z.number().int().optional(),
   screenshots: z.array(z.string()).optional(),
   massa: z.array(MassaEntrySchema).optional(),
@@ -162,6 +163,7 @@ export const DeviceSchema = z.object({
   enabled: z.boolean().optional(), // "Usar nos testes": físico ativado / emulador no conjunto de testes
   note: z.string().optional(),
   updatedAt: z.string(),
+  machineId: z.string().optional(), // máquina (ausente = mestre)
 })
 export type Device = z.infer<typeof DeviceSchema>
 
@@ -186,7 +188,11 @@ export const RunnerStateSchema = z.object({
 })
 export type RunnerState = z.infer<typeof RunnerStateSchema>
 
-export const DesiredSchema = z.object({ devices: z.number().int().min(0).max(18) })
+export const DesiredSchema = z.object({
+  devices: z.number().int().min(0).max(18),
+  /** emuladores desejados em cada worker (id da máquina → quantidade) */
+  machines: z.record(z.string(), z.number().int().min(0).max(18)).optional(),
+})
 
 /** Aparelhos físicos ativados para testes: serial → índice fixo (portas do Appium/UiAutomator2). */
 export const PhysicalStateSchema = z.object({ enabled: z.record(z.string(), z.number().int()) })
@@ -218,8 +224,34 @@ export const CommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("retry_item"), queueId: z.string(), itemId: z.string() }),
   z.object({ type: z.literal("delete_queue"), queueId: z.string() }),
   z.object({ type: z.literal("clear_queues") }),
-  z.object({ type: z.literal("start_devices"), count: z.number().int().min(1).max(18) }),
-  z.object({ type: z.literal("stop_all_devices") }),
+  z.object({ type: z.literal("start_devices"), count: z.number().int().min(1).max(18), machineId: z.string().optional() }),
+  z.object({ type: z.literal("stop_all_devices"), machineId: z.string().optional() }),
+  z.object({
+    type: z.literal("add_machine"),
+    id: z.string().regex(/^[a-z0-9][a-z0-9-]{1,31}$/),
+    name: z.string().trim().min(1).max(60),
+    host: z.string().trim().min(1).max(255),
+    sshUser: z.string().trim().min(1).max(64),
+    sshPort: z.number().int().min(1).max(65535).default(22),
+    maxDevices: z.number().int().min(1).max(18).default(6),
+    /** só no modo simulado: URL direta de um agente fake */
+    directUrl: z.string().url().optional(),
+    token: z.string().min(16).optional(),
+  }),
+  z.object({
+    type: z.literal("update_machine"),
+    id: z.string(),
+    name: z.string().trim().min(1).max(60).optional(),
+    host: z.string().trim().min(1).max(255).optional(),
+    sshUser: z.string().trim().min(1).max(64).optional(),
+    sshPort: z.number().int().min(1).max(65535).optional(),
+    maxDevices: z.number().int().min(1).max(18).optional(),
+  }),
+  z.object({ type: z.literal("remove_machine"), id: z.string() }),
+  z.object({ type: z.literal("set_machine_enabled"), id: z.string(), enabled: z.boolean() }),
+  z.object({ type: z.literal("test_machine"), id: z.string() }),
+  z.object({ type: z.literal("deploy_machine"), id: z.string() }),
+  z.object({ type: z.literal("rotate_machine_token"), id: z.string() }),
   z.object({ type: z.literal("restart_device"), serial: z.string() }),
   z.object({ type: z.literal("set_physical"), serial: z.string().min(1).max(100), enabled: z.boolean() }),
   z.object({ type: z.literal("set_emulator_enabled"), serial: z.string().min(1).max(100), enabled: z.boolean() }),

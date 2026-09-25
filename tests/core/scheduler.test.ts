@@ -175,4 +175,22 @@ describe("schedule", () => {
     // Assert
     expect(result).toEqual([{ queueId: q.id, itemId: "B", serial: "emulator-5556" }])
   })
+
+  it("nova tentativa depois de erro de infra prefere um celular de outra máquina", () => {
+    // Arrange
+    const tried = item("A", [], {
+      attempts: [attempt({ n: 1, serial: "emulator-5554", status: "infra_error" })],
+    })
+    const q = queue([tried])
+    const livres = [
+      { serial: "emulator-5556", index: 2 },
+      { serial: "server02:emulator-5554", index: 101, machineId: "server02" },
+    ]
+
+    // Act
+    const result = schedule([q], livres, [])
+
+    // Assert
+    expect(result.map((a) => a.serial)).toEqual(["server02:emulator-5554"])
+  })
 })
