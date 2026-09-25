@@ -1,7 +1,8 @@
 "use client"
 
-import { Download, GitBranch, RefreshCw } from "lucide-react"
+import { Download, GitBranch, Loader2, RefreshCw } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
 
 import { EmptyState, PageHeader } from "@/components/panel/page-header"
 import { StatusBadge } from "@/components/panel/status-badge"
@@ -34,14 +35,49 @@ interface ProjectDto {
 
 const short = (h?: string) => (h ? h.slice(0, 7) : "—")
 
+type GitCommand = { type: "project_fetch" } | { type: "project_update"; branch: string }
+/** Operação pedida nesta tela e ainda não terminada (`sinceOpId` = a última que já existia antes do clique). */
+interface Pending {
+  kind: "fetch" | "update"
+  branch?: string
+  sinceOpId?: string
+}
+
 /** Página Projeto: branch/commit do projeto Robot no servidor, atualizar (pull) escolhendo a branch e ver o código. */
 export function ProjectPage() {
+  const [pending, setPending] = useState<Pending | null>(null)
   const [fast, setFast] = useState(false)
   const { data, reload } = usePoll<ProjectDto>("/api/project", fast ? 1000 : 10_000)
   const st = data?.state
   const op = st?.op
   const running = op?.status === "running"
-  useEffect(() => setFast(running), [running])
+  const busy = !!pending || running
+  useEffect(() => setFast(busy), [busy])
+  // a operação desta tela é a primeira DEPOIS do clique; ela terminando → um único aviso (sucesso ou erro)
+  const current = pending && op && op.id !== pending.sinceOpId ? op : null
+  useEffect(() => {
+    if (!pending || !current || current.status === "running") return
+    if (current.status === "ok")
+      toast.success(
+        current.kind === "update"
+          ? `Projeto atualizado — ${current.message ?? ""}`
+          : (current.message ?? "Concluído"),
+      )
+    else toast.error(current.message ?? "A operação falhou")
+    setPending(null)
+  }, [pending, current])
+
+  async function start(cmd: GitCommand) {
+    setPending({
+      kind: cmd.type === "project_fetch" ? "fetch" : "update",
+      branch: "branch" in cmd ? cmd.branch : undefined,
+      sinceOpId: op?.id,
+    })
+    // o runner só confirma que começou: o aviso de sucesso vem quando terminar de verdade
+    const r = await sendCommand(cmd, { quiet: true })
+    if (!r?.ok) setPending(null)
+    void reload()
+  }
 
   return (
     <div>
@@ -75,8 +111,14 @@ export function ProjectPage() {
           </TabsList>
           <TabsContent value="resumo" className="grid gap-4 pt-2">
             <Summary st={st} />
-            <UpdateCard st={st} busy={running} onChanged={() => void reload()} />
-            {op && <OpLog op={op} />}
+            <UpdateCard
+              st={st}
+              busy={busy}
+              pending={pending}
+              onStart={start}
+              onChanged={() => void reload()}
+            />
+            {pending && !current ? <OpStarting pending={pending} /> : op && <OpLog op={op} />}
             <Commits title="Últimos commits no servidor" commits={st.commits ?? []} testid="commits" />
           </TabsContent>
           <TabsContent value="codigo" className="pt-2">
@@ -138,7 +180,21 @@ function Summary({ st }: { st: ProjectGitState }) {
   )
 }
 
-function UpdateCard({ st, busy, onChanged }: { st: ProjectGitState; busy: boolean; onChanged: () => void }) {
+function UpdateCard({
+  st,
+  busy,
+  pending,
+  onStart,
+  onChanged,
+}: {
+  st: ProjectGitState
+  busy: boolean
+  pending: Pending | null
+  onStart: (cmd: GitCommand) => Promise<void>
+  onChanged: () => void
+}) {
+  const running = (kind: Pending["kind"]) =>
+    (pending?.kind ?? (st.op?.status === "running" ? st.op.kind : null)) === kind
   const [branch, setBranch] = useState<string>("")
   const [confirm, setConfirm] = useState(false)
   const selected = branch || st.branch || ""
@@ -146,10 +202,6 @@ function UpdateCard({ st, busy, onChanged }: { st: ProjectGitState; busy: boolea
   const branches = st.remoteBranches ?? []
   const trackedDirty = (st.dirty ?? []).some((d) => d.code !== "??")
 
-  async function run(cmd: Parameters<typeof sendCommand>[0]) {
-    await sendCommand(cmd)
-    onChanged()
-  }
   async function pick(b: string) {
     setBranch(b)
     await sendCommand({ type: "project_preview", branch: b }, { quiet: true })
@@ -188,17 +240,19 @@ function UpdateCard({ st, busy, onChanged }: { st: ProjectGitState; busy: boolea
           <Button
             variant="outline"
             disabled={busy}
-            onClick={() => void run({ type: "project_fetch" })}
+            onClick={() => void onStart({ type: "project_fetch" })}
             data-testid="project-fetch"
           >
-            <RefreshCw className={busy ? "animate-spin" : ""} /> Buscar novidades
+            <RefreshCw className={running("fetch") ? "animate-spin" : ""} />{" "}
+            {running("fetch") ? "Buscando…" : "Buscar novidades"}
           </Button>
           <Button
             disabled={busy || !selected || trackedDirty}
             onClick={() => setConfirm(true)}
             data-testid="project-pull"
           >
-            <Download /> Atualizar
+            {running("update") ? <Loader2 className="animate-spin" /> : <Download />}{" "}
+            {running("update") ? "Atualizando…" : "Atualizar"}
           </Button>
         </div>
         {incoming && (
@@ -236,7 +290,7 @@ function UpdateCard({ st, busy, onChanged }: { st: ProjectGitState; busy: boolea
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => void run({ type: "project_update", branch: selected })}
+              onClick={() => void onStart({ type: "project_update", branch: selected })}
               data-testid="project-pull-confirm"
             >
               Atualizar
@@ -244,6 +298,25 @@ function UpdateCard({ st, busy, onChanged }: { st: ProjectGitState; busy: boolea
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </Card>
+  )
+}
+
+/** Logo depois do clique, até o runner registrar a operação: mostra que começou (sem esperar o próximo ciclo). */
+function OpStarting({ pending }: { pending: Pending }) {
+  return (
+    <Card className="gap-2 py-4" data-testid="project-op" data-status="running">
+      <CardHeader className="px-5">
+        <CardTitle className="flex items-center gap-2 text-base">
+          {pending.kind === "fetch" ? "Buscar novidades" : `Atualizar para ${pending.branch}`}{" "}
+          <StatusBadge label="iniciando…" tone="info" />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="px-5">
+        <p className="text-muted-foreground flex items-center gap-2 text-xs">
+          <Loader2 className="size-3.5 animate-spin" /> Enviando para o servidor…
+        </p>
+      </CardContent>
     </Card>
   )
 }
@@ -260,6 +333,7 @@ function OpLog({ op }: { op: NonNullable<ProjectGitState["op"]> }) {
       <CardHeader className="px-5">
         <CardTitle className="flex items-center gap-2 text-base">
           {op.kind === "fetch" ? "Buscar novidades" : `Atualizar para ${op.branch}`}{" "}
+          {op.status === "running" && <Loader2 className="size-4 animate-spin text-sky-600" />}
           <StatusBadge label={label} tone={tone} />
           <span className="text-muted-foreground text-xs font-normal">{formatDateTime(op.startedAt)}</span>
         </CardTitle>

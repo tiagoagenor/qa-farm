@@ -26,7 +26,10 @@ test("menu Projeto: escolher a branch mostra o que viria; atualizar troca a bran
   await page.getByTestId("project-pull-confirm").click()
 
   // Assert
-  await expect(page.getByTestId("project-op")).toHaveAttribute("data-status", "ok", { timeout: 20_000 })
+  await expect(page.getByTestId("project-op")).toBeVisible() // aparece na hora, sem esperar o próximo ciclo
+  await expect(page.getByText(/Projeto atualizado — Projeto em develop/)).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText("Atualizando o projeto para develop…")).toHaveCount(0) // sem aviso de "sucesso" antes de terminar
+  await expect(page.getByTestId("project-op")).toHaveAttribute("data-status", "ok")
   await expect(page.getByTestId("project-op")).toContainText("git switch develop")
   await expect(page.getByTestId("project-branch")).toHaveText("develop", { timeout: 20_000 })
 })
