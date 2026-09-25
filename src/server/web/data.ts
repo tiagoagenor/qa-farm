@@ -5,7 +5,9 @@ import path from "node:path"
 
 import { newId } from "@/core/ids"
 import { parseMassa } from "@/core/massa"
+import { localPorts, MachinesFileSchema, MachinesStatusFileSchema, parseDeviceKey } from "@/core/machines"
 import { MetricsFileSchema } from "@/core/metrics"
+import { agentClient } from "@/server/remote/agent-client"
 import { minTheoreticalSec, summarize } from "@/core/queue-logic"
 import { listJsonFiles, readJson, writeJsonAtomic } from "@/core/store"
 import {
@@ -41,6 +43,33 @@ export async function readMetrics() {
     updatedAt: m?.updatedAt ?? null,
     machines: (m?.machines ?? []).map((x) => ({ ...x, ageMs: x.sample ? now - Date.parse(x.sample.at) : null })),
   }
+}
+
+/** Máquinas worker para a tela (SEM o token) + status + chave pública do mestre. */
+export async function readMachines() {
+  const { p, cfg } = ctx()
+  const [file, status, pub] = await Promise.all([
+    readJson(p.machines, MachinesFileSchema, { machines: [] }),
+    readJson(p.machinesStatus, MachinesStatusFileSchema.nullable(), null),
+    fsp.readFile(path.join(p.state, "ssh", "qafarm_ed25519.pub"), "utf8").catch(() => ""),
+  ])
+  const byId = new Map((status?.machines ?? []).map((s) => [s.id, s]))
+  return {
+    master: { id: cfg.machineId },
+    publicKey: pub.trim() || null,
+    machines: file.machines.map(({ token: _token, ...m }) => ({ ...m, status: byId.get(m.id) ?? null })),
+  }
+}
+
+/** Cliente do agente para um celular de worker ("server02:emulator-5554"), ou null se for do mestre. */
+export async function remoteDevice(serial: string) {
+  const { p } = ctx()
+  const file = await readJson(p.machines, MachinesFileSchema, { machines: [] })
+  const parsed = parseDeviceKey(serial, new Set(file.machines.map((m) => m.id)))
+  if (!parsed.machineId) return null
+  const m = file.machines.find((x) => x.id === parsed.machineId)!
+  const base = m.transport === "direct" ? m.directUrl : `http://127.0.0.1:${localPorts(m.slot).agent}`
+  return base ? { client: agentClient(base, m.token, 20_000), serial: parsed.serial } : null
 }
 
 export async function devicesState() {

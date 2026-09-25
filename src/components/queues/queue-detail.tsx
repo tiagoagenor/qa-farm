@@ -206,7 +206,9 @@ function ItemRow({
         )}
       </TableCell>
     ),
-    celular: <TableCell className="font-mono text-xs">{a?.serial ?? "—"}</TableCell>,
+    celular: <TableCell className="font-mono text-xs">
+          {a ? (a.machineId ? `${a.machineId} · ${a.serial.slice(a.machineId.length + 1)}` : a.serial) : "—"}
+        </TableCell>,
     massa: (
       <TableCell data-testid="item-massa">
         {label ? (

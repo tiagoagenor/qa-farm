@@ -26,9 +26,26 @@ if (process.env.E2E_SKIP_BUILD !== "1") {
   execFileSync(bin("next"), ["build"], { cwd: root, stdio: "inherit", env })
   execFileSync(bin("tsup"), [], { cwd: root, stdio: "inherit", env })
 }
+// worker simulado: o agente de verdade (dist/agent.mjs) em modo fake, com 2 emuladores e "mundo" próprio
+const workerDir = path.join(root, "test-results", "e2e-worker")
+fs.rmSync(workerDir, { recursive: true, force: true })
+fs.mkdirSync(workerDir, { recursive: true })
+fs.writeFileSync(path.join(workerDir, "scenario.json"), JSON.stringify({ emulators: 2, bootDelayMs: 300, installDelayMs: 100 }))
+const workerEnv = {
+  ...process.env,
+  QAFARM_FAKE: "1",
+  QAFARM_DATA_DIR: path.join(workerDir, "data"),
+  QAFARM_REPO_ROOT: root,
+  QAFARM_FAKE_SCENARIO: path.join(workerDir, "scenario.json"),
+  QAFARM_AGENT_TOKEN: "e2e-worker-token-0123456789abcdef",
+  QAFARM_AGENT_PORT: process.env.E2E_WORKER_PORT ?? "3299",
+  QAFARM_AGENT_COMMIT: "e2e",
+  QAFARM_METRICS_INTERVAL_MS: "1000",
+}
 const procs = [
   spawn(bin("next"), ["start", "-p", port], { cwd: root, env, stdio: "inherit" }),
   spawn(process.execPath, ["dist/runner.mjs"], { cwd: root, env, stdio: "inherit" }),
+  spawn(process.execPath, ["dist/agent.mjs"], { cwd: root, env: workerEnv, stdio: "inherit" }),
 ]
 const stop = () => {
   for (const p of procs) p.kill("SIGTERM")

@@ -198,6 +198,8 @@ export class Runner {
     const desired = await readJson(this.p.desired, DesiredSchema, { devices: 0 })
     this.desired = desired.devices
     await this.remote.load(desired.machines ?? {})
+    // chave SSH dedicada do mestre (a página Máquinas mostra a pública para colar no worker)
+    await this.remote.ensureKey().catch((e: Error) => this.log(`não consegui criar a chave SSH do mestre: ${e.message}`))
     this.physical = new Map(Object.entries((await readJson(this.p.physical, PhysicalStateSchema, { enabled: {} })).enabled))
     this.disabledEmulators = new Set((await readJson(this.p.emulatorsDisabled, EmulatorsDisabledSchema, { disabled: [] })).disabled)
     const saved = await readJson(this.p.metrics, MetricsFileSchema.nullable(), null)

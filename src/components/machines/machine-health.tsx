@@ -12,6 +12,8 @@ import type { Tone } from "@/lib/format"
 import { refY, sparkPath } from "@/lib/sparkline"
 import { cn } from "@/lib/utils"
 
+import { MACHINE_STATE, MachineAdmin } from "./machine-admin"
+
 interface MachineDto {
   id: string
   name: string
@@ -20,6 +22,8 @@ interface MachineDto {
   history: HistoryPoint[]
   health: { level: "ok" | "warn" | "crit"; alerts: Array<{ id: string; level: "warn" | "crit"; message: string }>; brake: boolean; blockStart: boolean }
   ageMs: number | null
+  /** estado da conexão (só workers) */
+  state?: string
 }
 
 const LEVEL: Record<MachineDto["health"]["level"], { label: string; tone: Tone }> = {
@@ -113,6 +117,7 @@ function MachineCard({ m, memLimitMb }: { m: MachineDto; memLimitMb: number }) {
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="text-base">{m.name}</CardTitle>
           {m.role === "master" && <StatusBadge label="mestre" tone="info" />}
+          {m.role === "worker" && m.state && <StatusBadge {...(MACHINE_STATE[m.state] ?? MACHINE_STATE.pending)} />}
           <StatusBadge {...LEVEL[level]} />
           {m.health.brake && !stale && <StatusBadge label="freio ativo: novos casos aguardam" tone="fail" />}
           <span className="text-muted-foreground ml-auto text-xs" data-testid="machine-age">
@@ -123,7 +128,8 @@ function MachineCard({ m, memLimitMb }: { m: MachineDto; memLimitMb: number }) {
           <ul className="mt-1 grid gap-0.5 text-xs" data-testid="machine-alerts">
             {stale && (
               <li className="flex items-center gap-1 text-amber-700 dark:text-amber-400">
-                <AlertTriangle className="size-3.5" /> O runner não atualiza a saúde desta máquina (ele está rodando?)
+                <AlertTriangle className="size-3.5" />{" "}
+                {m.role === "worker" ? "Sem resposta da máquina: os casos dela aguardam até ela voltar" : "O runner não atualiza a saúde desta máquina (ele está rodando?)"}
               </li>
             )}
             {!stale &&
@@ -253,6 +259,7 @@ export function MachineHealth() {
           ))}
         </div>
       )}
+      <MachineAdmin />
     </div>
   )
 }

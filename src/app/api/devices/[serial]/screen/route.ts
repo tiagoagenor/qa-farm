@@ -1,4 +1,4 @@
-import { devicesState } from "@/server/web/data"
+import { devicesState, remoteDevice } from "@/server/web/data"
 import { ctx } from "@/server/web/context"
 import { error } from "@/server/web/http"
 
@@ -16,7 +16,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ serial:
   const hit = cache.get(serial)
   let png = hit && Date.now() - hit.at < TTL_MS ? hit.png : null
   if (!png) {
-    png = await ctx().ad.adb.screencap(serial)
+    const remote = await remoteDevice(serial)
+    png = remote ? await remote.client.screen(remote.serial) : await ctx().ad.adb.screencap(serial)
     if (!png || png.length < 8) return error("Não foi possível capturar a tela", 502)
     cache.set(serial, { at: Date.now(), png })
   }

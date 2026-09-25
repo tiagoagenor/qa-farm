@@ -101,6 +101,8 @@ export const MetricsFileSchema = z.object({
       sample: HostSampleSchema.nullable(),
       history: z.array(HistoryPointSchema),
       health: MachineHealthSchema,
+      /** estado da conexão (só workers) */
+      state: z.string().optional(),
     }),
   ),
 })
