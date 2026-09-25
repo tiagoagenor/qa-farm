@@ -80,6 +80,19 @@ nuvem; com ela fora do ar, esses casos esperam. O "Instalar / atualizar agente" 
 mesmo Python). Se o mestre sumir por 90 s, o worker encerra o robot órfão; se o worker cair no meio do caso, o caso
 vira erro de infraestrutura e volta para a fila.
 
+## Projeto: atualizar o código do Robot pelo painel
+
+**Página Projeto** (`/projeto`): branch e commit atuais do projeto Robot no servidor, commits recentes e se está
+atrás do servidor git. **Buscar novidades** faz `git fetch`; escolha a branch (mostra os commits e arquivos que
+viriam) e **Atualizar** troca de branch e avança **só por fast-forward**. Com alteração local no servidor ou branch
+local divergente, recusa e explica — nada é descartado automaticamente (sem reset/stash). Quem roda o git é o runner,
+uma operação por vez, travando junto com a cópia do projeto (snapshot); depois de atualizar, o catálogo é refeito.
+Filas em andamento seguem com o código de quando foram criadas.
+
+A aba **Código** mostra os arquivos (somente leitura). Valores dos arquivos de ambiente (`.env*`), a chave do
+BrowserStack e atribuições como `password`/`senha`/`token` aparecem como `••••`; `.git`, `.venv`, resultados e APKs
+não são listados. O git usa a chave SSH do usuário do servidor (`GIT_TERMINAL_PROMPT=0`, sem senha interativa).
+
 ## Desenvolvimento (Mac, sem emuladores)
 
 ```bash

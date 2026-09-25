@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+import { BranchNameSchema } from "./project-git"
+
 // ---------------------------------------------------------------- apps ---
 export const AppMetaSchema = z.object({
   id: z.string(),
@@ -274,6 +276,9 @@ export const CommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("remove_machine"), id: z.string() }),
   z.object({ type: z.literal("set_machine_enabled"), id: z.string(), enabled: z.boolean() }),
   z.object({ type: z.literal("set_machine_run_robot"), id: z.string(), enabled: z.boolean() }),
+  z.object({ type: z.literal("project_fetch") }),
+  z.object({ type: z.literal("project_update"), branch: BranchNameSchema }),
+  z.object({ type: z.literal("project_preview"), branch: BranchNameSchema }),
   z.object({ type: z.literal("test_machine"), id: z.string() }),
   z.object({ type: z.literal("deploy_machine"), id: z.string() }),
   z.object({ type: z.literal("rotate_machine_token"), id: z.string() }),

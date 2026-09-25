@@ -5,6 +5,7 @@ import path from "node:path"
 import { z } from "zod"
 
 import { RUN_OUT, RUN_REPO } from "@/core/agent-protocol"
+import { type GitOp, maskSecrets, type ProjectGitState } from "@/core/project-git"
 import type { Config } from "@/core/config"
 import { newId } from "@/core/ids"
 import { deviceKey, dispatchBudget, globalIndex, interleaveByMachine, parseDeviceKey, splitIndex } from "@/core/machines"
@@ -47,6 +48,7 @@ import type { AppiumPool } from "@/server/appium"
 import { killGroup } from "@/server/exec"
 import type { FarmOp } from "@/server/farm"
 import { describeOp } from "@/server/farm"
+import { projectSecrets } from "@/server/project-git"
 import type { Snapshot } from "@/server/snapshot"
 
 import { RemoteMachines } from "./remote"
@@ -135,6 +137,14 @@ export class Runner {
   private catalogError?: string
   private snapshot: Snapshot | null = null
   private catalogBuild: Promise<void> | null = null
+  // ---- projeto Robot (git): uma operação por vez; a trava também cobre a cópia (snapshot) do projeto,
+  // para um pull no meio do rsync não gerar um snapshot que não bate com o hash
+  private projectChain: Promise<unknown> = Promise.resolve()
+  private gitOp?: GitOp
+  private gitPreview?: string
+  private gitState: Omit<ProjectGitState, "updatedAt" | "op"> = {}
+  private lastGitStatus = 0
+  private gitStatusBusy = false
   private activeAppId?: string
   private appMetaCache = new Map<string, AppMeta | null>()
   private ticking = false
@@ -256,6 +266,7 @@ export class Runner {
     this.catalogStatus = this.catalog ? "ready" : "missing"
     await this.pickActiveApp()
     void this.refreshCatalog(false)
+    void this.refreshGitState()
     this.log(`iniciado (fake=${this.cfg.fake}) filas=${this.queues.size} desejados=${this.desired}`)
   }
 
@@ -276,6 +287,7 @@ export class Runner {
       this.reconcileRemoteFarms()
       await this.reconcileOrphans()
       await this.processRemoteCleanup()
+      if (Date.now() - this.lastGitStatus > 60_000) void this.refreshGitState()
       await this.collectMetrics()
       await this.dispatch()
       await this.writeRunnerState()
@@ -559,6 +571,85 @@ export class Runner {
     return best?.id
   }
 
+  // ------------------------------------------------------ projeto (git) ---
+  /** Serializa tudo que lê ou muda a pasta do projeto (cópia para snapshot e operações git). */
+  private withProject<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.projectChain.then(fn, fn)
+    this.projectChain = next.catch(() => undefined)
+    return next
+  }
+
+  private ensureSnapshot(): Promise<Snapshot> {
+    return this.withProject(() => this.ad.snapshots.ensure())
+  }
+
+  /** Lê branch, commits, alterações e branches remotas (sem rede) e grava state/project-git.json. */
+  private async refreshGitState(): Promise<void> {
+    if (this.gitStatusBusy) return
+    this.gitStatusBusy = true
+    this.lastGitStatus = Date.now()
+    try {
+      const snap = await this.withProject(() => this.ad.git.snapshot(this.gitPreview))
+      this.gitState = { ...this.gitState, ...snap, remoteUrl: await this.ad.git.remoteUrl().catch(() => undefined), error: undefined }
+    } catch (e) {
+      this.gitState = { ...this.gitState, error: (e as Error).message }
+    } finally {
+      this.gitStatusBusy = false
+    }
+    await this.writeGitState()
+  }
+
+  private async writeGitState(): Promise<void> {
+    const secrets = await projectSecrets(this.cfg).catch(() => [] as string[])
+    const mask = (t: string) => maskSecrets(t, secrets).text
+    const state: ProjectGitState = {
+      ...this.gitState,
+      updatedAt: new Date().toISOString(),
+      op: this.gitOp && { ...this.gitOp, message: this.gitOp.message && mask(this.gitOp.message), log: this.gitOp.log.map(mask) },
+    }
+    await writeJsonAtomic(this.p.projectGit, state)
+  }
+
+  /** Busca (fetch) ou atualiza (troca de branch + fast-forward) em segundo plano; uma por vez. */
+  private startGitOp(kind: GitOp["kind"], branch?: string): { ok: boolean; message: string } {
+    if (this.gitOp?.status === "running") return { ok: false, message: "Operação git em andamento; aguarde terminar" }
+    const op: GitOp = { id: newId("git"), kind, branch, status: "running", startedAt: new Date().toISOString(), log: [] }
+    this.gitOp = op
+    const log = (l: string) => {
+      op.log.push(l)
+      if (op.log.length > 300) op.log.splice(0, op.log.length - 300)
+    }
+    const timer = setInterval(() => void this.writeGitState(), 1000)
+    this.log(`projeto: ${kind === "fetch" ? "buscando atualizações (fetch)" : `atualizando para ${branch}`}`)
+    void (async () => {
+      let ok = false
+      try {
+        if (kind === "fetch") {
+          await this.withProject(() => this.ad.git.fetch(log))
+          ok = true
+          op.message = "Branches e commits do servidor git atualizados"
+        } else {
+          const r = await this.withProject(() => this.ad.git.update(branch!, log))
+          ok = r.ok
+          op.message = r.message
+        }
+        if (ok) this.gitState = { ...this.gitState, fetchedAt: new Date().toISOString() }
+      } catch (e) {
+        op.message = (e as Error).message
+        log(`✖ ${op.message}`)
+      }
+      clearInterval(timer)
+      op.status = ok ? "ok" : "error"
+      op.endedAt = new Date().toISOString()
+      if (kind === "update" && ok) this.gitPreview = undefined
+      this.log(`projeto: ${op.status === "ok" ? "ok" : "falhou"} — ${op.message ?? ""}`)
+      await this.refreshGitState()
+      // código novo → snapshot e catálogo novos (filas em andamento seguem com o snapshot delas)
+      if (kind === "update" && ok) void this.refreshCatalog(false)
+    })()
+    return { ok: true, message: kind === "fetch" ? "Buscando atualizações do servidor git…" : `Atualizando o projeto para ${branch}…` }
+  }
+
   // ------------------------------------------------------------- catálogo ---
   private refreshCatalog(force: boolean): Promise<void> {
     if (this.catalogBuild) return this.catalogBuild
@@ -571,7 +662,7 @@ export class Runner {
   private async buildCatalog(force: boolean): Promise<void> {
     this.catalogStatus = "building"
     try {
-      this.snapshot = await this.ad.snapshots.ensure()
+      this.snapshot = await this.ensureSnapshot()
       if (force || !this.catalog || this.catalog.snapshotHash !== this.snapshot.hash) {
         this.log(`gerando catálogo (snapshot ${this.snapshot.hash})`)
         this.catalog = await this.ad.catalog.build(this.snapshot.dir, this.snapshot.hash)
@@ -627,7 +718,7 @@ export class Runner {
         if (other) return { ok: false, message: `A fila "${other.name}" usa outro app. Um app por vez: aguarde, cancele ou use o mesmo app.` }
         if (!this.catalog && this.catalogBuild) await this.catalogBuild // 1ª geração ainda em andamento
         if (!this.catalog) return { ok: false, message: "Catálogo ainda não está pronto" }
-        const snap = this.snapshot ?? (this.snapshot = await this.ad.snapshots.ensure())
+        const snap = this.snapshot ?? (this.snapshot = await this.ensureSnapshot())
         const byId = new Map(this.catalog.entries.map((e) => [e.id, e]))
         const { queue, missing } = buildQueue(newId("queue"), c.input, byId, new Date())
         if (queue.items.length === 0) return { ok: false, message: "Nenhum caso selecionado existe no catálogo atual" }
@@ -891,6 +982,15 @@ export class Runner {
           ok: true,
           message: c.enabled ? "Máquina ativada: volta a receber casos" : busyThere ? "Máquina drenando: termina os casos atuais e não recebe novos" : "Máquina desativada",
         }
+      }
+      case "project_fetch":
+        return this.startGitOp("fetch")
+      case "project_update":
+        return this.startGitOp("update", c.branch)
+      case "project_preview": {
+        this.gitPreview = c.branch
+        await this.refreshGitState()
+        return { ok: true, message: `Mostrando o que a branch ${c.branch} traria` }
       }
       case "set_machine_run_robot": {
         try {
@@ -1385,9 +1485,9 @@ export class Runner {
     let snap = this.snapshot
     if (!snap || (q.snapshotHash && snap.hash !== q.snapshotHash)) {
       const dir = path.join(this.p.workspaces, q.snapshotHash ?? "")
-      snap = q.snapshotHash && fs.existsSync(dir) ? { hash: q.snapshotHash, dir } : await this.ad.snapshots.ensure()
+      snap = q.snapshotHash && fs.existsSync(dir) ? { hash: q.snapshotHash, dir } : await this.ensureSnapshot()
     }
-    if (this.cfg.fake) snap = await this.ad.snapshots.ensure()
+    if (this.cfg.fake) snap = await this.ensureSnapshot()
     const host = this.robotHostFor(machineId)
     if (host === null) return
     const agent = host ? this.remote.client(host) : null

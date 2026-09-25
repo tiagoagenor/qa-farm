@@ -7,6 +7,7 @@ import { type CatalogBuilder, fakeCatalog, realCatalog } from "./catalog"
 import { type Farm, fakeFarm, realFarm } from "./farm"
 import { type BrowserStackApi, fakeBrowserStack, realBrowserStack } from "./browserstack"
 import { fakeHostMetrics, type HostMetrics, realHostMetrics } from "./host-metrics"
+import { fakeProjectGit, type ProjectGit, projectRoot, realProjectGit } from "./project-git"
 import { fakeRobot, realRobot, type RobotLauncher } from "./robot"
 import { fakeSnapshots, realSnapshots, type SnapshotProvider } from "./snapshot"
 
@@ -20,6 +21,7 @@ export interface Adapters {
   snapshots: SnapshotProvider
   metrics: HostMetrics
   browserstack: BrowserStackApi
+  git: ProjectGit
 }
 
 export function createAdapters(cfg: Config): Adapters {
@@ -34,6 +36,7 @@ export function createAdapters(cfg: Config): Adapters {
       snapshots: fakeSnapshots(cfg),
       metrics: fakeHostMetrics(cfg),
       browserstack: fakeBrowserStack(cfg),
+      git: fakeProjectGit(cfg, projectRoot(cfg)),
     }
   }
   return {
@@ -46,5 +49,6 @@ export function createAdapters(cfg: Config): Adapters {
     snapshots: realSnapshots(cfg),
     metrics: realHostMetrics(),
     browserstack: realBrowserStack(cfg),
+    git: realProjectGit(cfg.robotProject),
   }
 }
