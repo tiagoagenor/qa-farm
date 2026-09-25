@@ -19,6 +19,8 @@ export type BsSlot = z.infer<typeof BsSlotSchema>
 export const BsStateSchema = z.object({
   enabled: z.boolean().default(false),
   slots: z.array(BsSlotSchema).default([]),
+  /** máquina que roda o robot dos casos do BrowserStack (vazio = mestre) */
+  runOn: z.string().optional(),
 })
 export type BsState = z.infer<typeof BsStateSchema>
 

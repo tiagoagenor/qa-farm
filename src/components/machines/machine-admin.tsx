@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { usePoll } from "@/hooks/use-poll"
 import { sendCommand } from "@/lib/client"
@@ -35,6 +36,8 @@ export interface MachineRow {
   maxDevices: number
   enabled: boolean
   transport: "ssh" | "direct"
+  /** o robot dos casos dos celulares desta máquina roda nela */
+  runRobot?: boolean
   status: {
     state: string
     lastSeenAt?: string
@@ -46,6 +49,8 @@ export interface MachineRow {
     emulators: number
     farmJob?: { command: string; startedAt: string }
     clockSkewMs?: number
+    robotReady?: boolean
+    robotRuns?: number
   } | null
 }
 export interface MachinesDto {
@@ -236,7 +241,7 @@ function StartDialog({ m, onClose, onDone }: { m: MachineRow | null; onClose: ()
   )
 }
 
-/** Máximo de casos ao mesmo tempo no pool todo (o robot de todo caso roda no mestre). */
+/** Máximo de casos ao mesmo tempo no pool todo (todas as máquinas e o BrowserStack). */
 function ParallelLimit({ value, onSaved }: { value: number; onSaved: () => void }) {
   const [v, setV] = useState<string | null>(null)
   const cur = v ?? String(value)
@@ -261,7 +266,7 @@ function ParallelLimit({ value, onSaved }: { value: number; onSaved: () => void 
         Salvar
       </Button>
       <span className="text-muted-foreground text-xs">
-        {value ? `Hoje: ${value}.` : "Hoje: sem limite."} 0 = sem limite. Todo caso roda o Robot neste servidor, inclusive os dos celulares de outras máquinas —
+        {value ? `Hoje: ${value}.` : "Hoje: sem limite."} 0 = sem limite. Vale para o pool todo (todas as máquinas e o BrowserStack) —
         limitar evita processador no máximo e esperas estourando. Vale na hora (os que estão rodando continuam).
       </span>
     </div>
@@ -305,6 +310,7 @@ export function MachineAdmin() {
                 <TableHead>Status</TableHead>
                 <TableHead>Última resposta</TableHead>
                 <TableHead>Agente</TableHead>
+                <TableHead>Robot</TableHead>
                 <TableHead className="text-right">Emuladores</TableHead>
                 <TableHead className="w-12" />
               </TableRow>
@@ -320,6 +326,7 @@ export function MachineAdmin() {
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs">—</TableCell>
                 <TableCell className="text-muted-foreground text-xs">painel e runner</TableCell>
+                <TableCell className="text-muted-foreground text-xs">celulares daqui e das máquinas sem robot próprio</TableCell>
                 <TableCell className="text-right text-xs">página Celulares</TableCell>
                 <TableCell />
               </TableRow>
@@ -348,6 +355,21 @@ export function MachineAdmin() {
                     </TableCell>
                     <TableCell className="text-xs">{ago(st?.lastSeenAt)}</TableCell>
                     <TableCell className="font-mono text-xs">{st?.agentCommit ? `${st.agentVersion} · ${st.agentCommit}` : "—"}</TableCell>
+                    <TableCell data-testid="machine-robot">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={!!m.runRobot}
+                          disabled={busy}
+                          aria-label={`Rodar o robot em ${m.name}`}
+                          onCheckedChange={(v) => run({ type: "set_machine_run_robot", id: m.id, enabled: v })}
+                          data-testid="machine-run-robot"
+                        />
+                        <span className="text-xs">
+                          {m.runRobot ? (st?.robotReady === false ? "aqui (não instalado → mestre)" : "aqui") : "no mestre"}
+                          {m.runRobot && st?.robotRuns ? <span className="text-muted-foreground"> · {st.robotRuns} rodando</span> : null}
+                        </span>
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right text-xs tabular-nums" data-testid="machine-emulators">
                       {st?.emulators ?? 0} ligados · alvo {st?.desired ?? 0} · máx {m.maxDevices}
                     </TableCell>

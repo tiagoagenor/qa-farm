@@ -87,6 +87,8 @@ export const AttemptSchema = z.object({
   dir: z.string(), // relativo a runs/
   machineId: z.string().optional(), // máquina do celular (ausente = mestre)
   pgid: z.number().int().optional(),
+  /** máquina onde o robot rodou (ausente = mestre) */
+  robotOn: z.string().optional(),
   screenshots: z.array(z.string()).optional(),
   massa: z.array(MassaEntrySchema).optional(),
   /** link da sessão no BrowserStack (vídeo e logs) */
@@ -186,6 +188,8 @@ export const RunnerStateSchema = z.object({
   fake: z.boolean(),
   activeAppId: z.string().optional(),
   pgids: z.array(z.number().int()),
+  /** robots rodando nos workers (o runner novo manda encerrar: o caso volta para a fila) */
+  remoteRuns: z.array(z.object({ host: z.string(), runId: z.string() })).optional(),
   farmJob: z.object({ command: z.string(), startedAt: z.string() }).optional(),
   catalogStatus: z.enum(["missing", "building", "ready", "error"]),
   catalogError: z.string().optional(),
@@ -240,6 +244,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("bs_set_enabled"), enabled: z.boolean() }),
   z.object({ type: z.literal("bs_add_slot"), device: z.string().min(1).max(80), osVersion: z.string().min(1).max(20) }),
   z.object({ type: z.literal("bs_remove_slot"), id: z.number().int() }),
+  z.object({ type: z.literal("bs_set_run_on"), machineId: z.string().max(32).nullable() }),
   z.object({ type: z.literal("bs_set_slot_enabled"), id: z.number().int(), enabled: z.boolean() }),
   z.object({ type: z.literal("delete_queue"), queueId: z.string() }),
   z.object({ type: z.literal("clear_queues") }),
@@ -268,6 +273,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("remove_machine"), id: z.string() }),
   z.object({ type: z.literal("set_machine_enabled"), id: z.string(), enabled: z.boolean() }),
+  z.object({ type: z.literal("set_machine_run_robot"), id: z.string(), enabled: z.boolean() }),
   z.object({ type: z.literal("test_machine"), id: z.string() }),
   z.object({ type: z.literal("deploy_machine"), id: z.string() }),
   z.object({ type: z.literal("rotate_machine_token"), id: z.string() }),

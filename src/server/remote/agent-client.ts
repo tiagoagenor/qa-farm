@@ -1,6 +1,8 @@
+import { spawn } from "node:child_process"
 import fs from "node:fs"
 import fsp from "node:fs/promises"
 import { createHash } from "node:crypto"
+import { Readable } from "node:stream"
 
 import {
   AGENT_PROTOCOL,
@@ -10,6 +12,10 @@ import {
   type DeviceAction,
   FarmOpStatusSchema,
   PROTOCOL_HEADER,
+  RunFilesSchema,
+  type RunRequest,
+  type RunStatus,
+  RunStatusSchema,
 } from "@/core/agent-protocol"
 import type { FarmOp } from "@/server/farm"
 
@@ -43,6 +49,16 @@ export interface AgentClient {
   appiumSessions(index: number): Promise<number>
   appiumCleanup(index: number, serial: string): Promise<number>
   appiumStopAll(): Promise<void>
+  /** Envia o snapshot do projeto (tar.gz) uma vez por worker e revisão. */
+  ensureWorkspace(hash: string, dir: string): Promise<void>
+  runStart(req: RunRequest): Promise<RunStatus>
+  /** null = o worker não conhece a execução */
+  runStatus(runId: string): Promise<RunStatus | null>
+  runKill(runId: string, signal: "SIGTERM" | "SIGKILL"): Promise<void>
+  runFiles(runId: string): Promise<Array<{ name: string; size: number }>>
+  /** conteúdo a partir de `offset` (console ao vivo) */
+  runFile(runId: string, name: string, offset?: number): Promise<Buffer>
+  runDelete(runId: string): Promise<void>
 }
 
 const md5Cache = new Map<string, { mtimeMs: number; size: number; md5: string }>()
@@ -85,6 +101,8 @@ export function agentClient(baseUrl: string, token: string, timeoutMs = 3000): A
   const json = async <T>(method: string, p: string, body?: unknown, ms?: number) => (await (await call(method, p, body, ms)).json()) as T
   const dev = (serial: string) => `/v1/devices/${encodeURIComponent(serial)}`
   const uploading = new Map<string, Promise<void>>()
+  const sendingWs = new Map<string, Promise<void>>()
+  const run = (id: string) => `/v1/runs/${encodeURIComponent(id)}`
 
   return {
     baseUrl,
@@ -137,6 +155,51 @@ export function agentClient(baseUrl: string, token: string, timeoutMs = 3000): A
     appiumCleanup: async (i, serial) => (await json<{ removed: number }>("POST", `/v1/appium/${i}/cleanup`, { serial }, 20_000)).removed,
     appiumStopAll: async () => {
       await call("POST", "/v1/appium/stop-all", {}, 30_000)
+    },
+    async ensureWorkspace(hash, dir) {
+      const head = await fetch(`${baseUrl}/v1/workspaces/${hash}`, { method: "HEAD", headers, signal: AbortSignal.timeout(timeoutMs) }).catch(() => null)
+      if (head?.ok) return
+      if (!sendingWs.has(hash)) {
+        sendingWs.set(
+          hash,
+          (async () => {
+            // -h não: os links de maiúsculas/minúsculas do snapshot seguem como links
+            const tar = spawn("tar", ["-C", dir, "-czf", "-", "."], { stdio: ["ignore", "pipe", "ignore"] })
+            const done = new Promise<number | null>((r) => tar.on("close", r))
+            const r = await fetch(`${baseUrl}/v1/workspaces/${hash}`, {
+              method: "PUT",
+              headers: { ...headers, "Content-Type": "application/gzip" },
+              body: Readable.toWeb(tar.stdout) as unknown as BodyInit,
+              duplex: "half",
+              signal: AbortSignal.timeout(5 * 60_000),
+            } as RequestInit).catch((e: Error) => {
+              tar.kill()
+              throw new AgentError(`falha ao enviar o projeto (${e.message})`)
+            })
+            if ((await done) !== 0) throw new AgentError("tar do snapshot falhou")
+            if (!r.ok) throw new AgentError(`falha ao enviar o projeto (${r.status})`, r.status)
+          })().finally(() => sendingWs.delete(hash)),
+        )
+      }
+      await sendingWs.get(hash)
+    },
+    runStart: async (req) => RunStatusSchema.parse(await json("POST", "/v1/runs", req, 30_000)),
+    async runStatus(id) {
+      try {
+        return RunStatusSchema.parse(await json("GET", run(id), undefined, 8_000))
+      } catch (e) {
+        if (e instanceof AgentError && e.status === 404) return null
+        throw e
+      }
+    },
+    runKill: async (id, signal) => {
+      await call("POST", `${run(id)}/kill`, { signal }, 10_000)
+    },
+    runFiles: async (id) => RunFilesSchema.parse(await json("GET", `${run(id)}/files`, undefined, 15_000)).files,
+    runFile: async (id, name, offset = 0) =>
+      Buffer.from(await (await call("GET", `${run(id)}/files?name=${encodeURIComponent(name)}&offset=${offset}`, undefined, 120_000)).arrayBuffer()),
+    runDelete: async (id) => {
+      await call("DELETE", run(id), undefined, 20_000)
     },
   }
 }

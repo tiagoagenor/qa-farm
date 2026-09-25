@@ -53,7 +53,7 @@ cada máquina, ao vivo, com mini-gráficos de 30 min. Lido de `/proc` e `/sys/cl
 crítica (temperatura ≥ 85 °C, troca ativa com o swap, CPU saturada) a máquina **não recebe casos novos**; os que
 estão rodando terminam. O ponto no menu fica amarelo/vermelho.
 
-**Mais máquinas na fazenda:** este servidor é o **mestre** (painel, filas, execução do Robot e resultados). Outra
+**Mais máquinas na fazenda:** este servidor é o **mestre** (painel, filas, resultados e, por padrão, a execução do Robot). Outra
 máquina entra como **worker**: roda só um agente leve (emuladores, adb, Appium, métricas) e o mestre fala com ela
 por um **túnel SSH** que ele mesmo abre (nenhuma porta nova exposta; o agente escuta em `127.0.0.1:7100`).
 
@@ -70,6 +70,15 @@ Celular de worker: serial `server02:emulator-5554`, índice global `100 × slot 
 Se o worker cair, os casos dele viram erro de infraestrutura e voltam para a fila (outra máquina); os emuladores
 dele não são reiniciados pelo mestre. Depois de atualizar o mestre, use "Instalar / atualizar agente" para manter o
 mesmo commit nos workers.
+
+**Dividir a carga (robot no worker):** a coluna **Robot** da tabela liga "robot nesta máquina": os casos dos
+celulares do worker passam a rodar o `robot` nele mesmo, e o mestre só coordena. O mestre envia o snapshot do
+projeto uma vez por revisão, acompanha o console ao vivo e, no fim, traz os artefatos para `runs/` (e apaga a cópia
+do worker). No card do BrowserStack, **Robot dos casos roda em** escolhe a máquina que roda o robot das vagas da
+nuvem; com ela fora do ar, esses casos esperam. O "Instalar / atualizar agente" monta o venv
+(`~/qa-farm-agent/robot-venv`) com os mesmos pacotes do venv do projeto no mestre, offline e sem sudo (precisa do
+mesmo Python). Se o mestre sumir por 90 s, o worker encerra o robot órfão; se o worker cair no meio do caso, o caso
+vira erro de infraestrutura e volta para a fila.
 
 ## Desenvolvimento (Mac, sem emuladores)
 

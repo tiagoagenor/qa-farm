@@ -14,13 +14,33 @@ DEST="$W_USER@$W_HOST"
 
 [ -f "$REPO/dist/agent.mjs" ] || { echo "Falta dist/agent.mjs (rode o build)" >&2; exit 1; }
 echo "==> preparando ~/qa-farm-agent em $DEST"
-"${SSH[@]}" "$DEST" 'mkdir -p ~/qa-farm-agent/dist ~/qa-farm-agent/scripts/farm ~/qa-farm-agent/scripts/ops ~/qa-farm-agent/data'
+"${SSH[@]}" "$DEST" 'mkdir -p ~/qa-farm-agent/dist ~/qa-farm-agent/scripts/farm ~/qa-farm-agent/scripts/ops ~/qa-farm-agent/scripts/robot ~/qa-farm-agent/data'
 
 echo "==> enviando agente e scripts"
 RSYNC_SSH="ssh -i $W_KEY -p $W_PORT -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$W_KNOWN_HOSTS"
 rsync -a -e "$RSYNC_SSH" "$REPO/dist/agent.mjs" "$DEST:qa-farm-agent/dist/"
 rsync -a -e "$RSYNC_SSH" "$REPO/scripts/farm/" "$DEST:qa-farm-agent/scripts/farm/"
 rsync -a -e "$RSYNC_SSH" "$REPO/scripts/ops/agent-supervisor.sh" "$DEST:qa-farm-agent/scripts/ops/"
+# listeners do robot (o robot dos casos pode rodar no worker) — o fake_robot vai junto para o modo simulado
+rsync -a --delete --exclude tests --exclude __pycache__ -e "$RSYNC_SSH" "$REPO/scripts/robot/" "$DEST:qa-farm-agent/scripts/robot/"
+
+echo "==> robot no worker (venv com os mesmos pacotes do mestre, instalado offline — sem sudo)"
+ROBOT_PROJECT="${QAFARM_ROBOT_PROJECT:-$HOME/www/QA_Automacao_APP}"
+if "${SSH[@]}" "$DEST" 'test -x ~/qa-farm-agent/robot-venv/bin/robot'; then
+  echo "    já instalado"
+elif [ -x "$ROBOT_PROJECT/.venv/bin/pip" ]; then
+  WHEELS="$(mktemp -d)"
+  "$ROBOT_PROJECT/.venv/bin/pip" freeze > "$WHEELS/freeze.txt"
+  "$ROBOT_PROJECT/.venv/bin/pip" download -q -r "$WHEELS/freeze.txt" pip -d "$WHEELS"
+  rsync -a --delete -e "$RSYNC_SSH" "$WHEELS/" "$DEST:qa-farm-agent/robot-wheels/"
+  rm -rf "$WHEELS"
+  "${SSH[@]}" "$DEST" 'set -e; cd ~/qa-farm-agent; rm -rf robot-venv; python3 -m venv --without-pip robot-venv
+    robot-venv/bin/python "$(ls robot-wheels/pip-*.whl | head -1)/pip" install -q --no-index --find-links robot-wheels pip
+    robot-venv/bin/pip install -q --no-index --find-links robot-wheels -r robot-wheels/freeze.txt
+    robot-venv/bin/robot --version || true'
+else
+  echo "    atenção: venv do projeto não encontrado em $ROBOT_PROJECT/.venv — o robot dos casos segue no mestre"
+fi
 
 echo "==> gravando configuração (.env, chmod 600)"
 "${SSH[@]}" "$DEST" 'umask 077; cat > ~/qa-farm-agent/.env' <<ENV
@@ -37,6 +57,7 @@ QAFARM_APPIUM_BIN=\$HOME/node/bin/appium
 QAFARM_APPIUM_BASE_PORT=4800
 QAFARM_DEVICES_PER_APPIUM=5
 QAFARM_INSTALL_CONCURRENCY=5
+QAFARM_ROBOT_BIN=\$HOME/qa-farm-agent/robot-venv/bin/robot
 ENV
 
 echo "==> ajustando o Appium copiado do mestre (caminhos absolutos /home/<outro usuário>)"

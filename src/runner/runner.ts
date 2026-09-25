@@ -4,6 +4,7 @@ import path from "node:path"
 
 import { z } from "zod"
 
+import { RUN_OUT, RUN_REPO } from "@/core/agent-protocol"
 import type { Config } from "@/core/config"
 import { newId } from "@/core/ids"
 import { deviceKey, dispatchBudget, globalIndex, interleaveByMachine, parseDeviceKey, splitIndex } from "@/core/machines"
@@ -62,7 +63,10 @@ interface RunningAttempt {
   machineId?: string
   /** vaga do BrowserStack (sem adb/Appium locais) */
   cloud?: boolean
+  /** grupo do robot local (0 = robot rodando num worker) */
   pgid: number
+  /** robot rodando num worker (divide a carga do mestre) */
+  remote?: RemoteRun
   dir: string
   qemuPid?: number
   timedOut: boolean
@@ -72,7 +76,23 @@ interface RunningAttempt {
   timers: NodeJS.Timeout[]
 }
 
+interface RemoteRun {
+  host: string
+  runId: string
+  /** bytes do console já copiados */
+  offset: number
+  lastOkAt: number
+  polling: boolean
+  finishing: boolean
+  /** worker sem resposta: artefatos ficam lá (limpeza pendente) */
+  unreachable?: boolean
+}
+
 const DEVICE_REFRESH_MS = 2000
+/** consulta do robot remoto (renova o lease no worker: 90 s sem consulta → o worker mata o robot) */
+const REMOTE_POLL_MS = 3000
+/** arquivo de artefato maior que isso não é copiado do worker */
+const REMOTE_FILE_MAX = 200 * 1024 * 1024
 const INSTALL_RETRY_MS = 3 * 60_000
 /** Janelas de erro do Android que bloqueiam a tela (ANR / app parou). */
 export const ERROR_DIALOG_RE = /Application Not Responding|Application Error|isn.t responding|has stopped|keeps stopping/i
@@ -126,6 +146,9 @@ export class Runner {
   private settings: Settings = { maxParallel: 0 }
   // BrowserStack: vagas, plano (sessões paralelas da conta) e APKs já enviados
   private bs: BsState = { enabled: false, slots: [] }
+  /** robots de worker a encerrar/apagar (mestre reiniciou, worker sumiu no meio do caso) */
+  private remoteCleanup: Array<{ host: string; runId: string; since: number }> = []
+  private lastBsHostLog = 0
   private bsPlan: BsPlan | null = null
   private bsPlanAt = 0
   private bsError?: string
@@ -138,7 +161,7 @@ export class Runner {
     private readonly cfg: Config,
     private readonly ad: Adapters,
     private readonly log: Log = (m) => console.log(`[runner ${new Date().toISOString()}] ${m}`),
-    private readonly opts: { deviceRefreshMs?: number } = {},
+    private readonly opts: { deviceRefreshMs?: number; remotePollMs?: number } = {},
   ) {
     this.p = dataPaths(cfg.dataDir)
     this.remote = new RemoteMachines(cfg, this.p, log)
@@ -173,6 +196,8 @@ export class Runner {
     // 1) mata processos robot que sobraram do runner anterior
     const prev = await readJson(this.p.runnerState, RunnerStateSchema.nullable(), null)
     for (const pgid of prev?.pgids ?? []) killGroup(pgid, "SIGKILL")
+    // robots que o runner anterior deixou nos workers: encerra assim que o worker responder
+    for (const r of prev?.remoteRuns ?? []) this.remoteCleanup.push({ ...r, since: Date.now() })
     this.activeAppId = prev?.activeAppId
     // 2) Appiums antigos (sessões presas) — sobem de novo sob demanda
     await this.appium.killStray()
@@ -247,6 +272,7 @@ export class Runner {
       this.processFarmOps()
       this.reconcileRemoteFarms()
       await this.reconcileOrphans()
+      await this.processRemoteCleanup()
       await this.collectMetrics()
       await this.dispatch()
       await this.writeRunnerState()
@@ -478,7 +504,8 @@ export class Runner {
       heartbeatAt: new Date().toISOString(),
       fake: this.cfg.fake,
       activeAppId: this.activeAppId,
-      pgids: [...this.running.values()].map((r) => r.pgid),
+      pgids: [...this.running.values()].map((r) => r.pgid).filter((p) => p > 1),
+      remoteRuns: [...this.running.values()].flatMap((r) => (r.remote ? [{ host: r.remote.host, runId: r.remote.runId }] : [])),
       farmJob: this.farmJob,
       catalogStatus: this.catalogStatus,
       catalogError: this.catalogError,
@@ -688,6 +715,18 @@ export class Runner {
         this.lastDeviceRefresh = 0
         return { ok: true, message: `Vaga ${c.id} ${c.enabled ? "ativada" : "desativada (termina o caso atual)"}` }
       }
+      case "bs_set_run_on": {
+        const id = c.machineId || undefined
+        if (id && !this.remote.get(id)) return { ok: false, message: "Máquina não encontrada" }
+        this.bs = { ...this.bs, runOn: id }
+        await writeJsonAtomic(this.p.browserstack, this.bs)
+        return {
+          ok: true,
+          message: id
+            ? `Casos do BrowserStack passam a rodar o robot em ${this.remote.get(id)!.name} (os em andamento terminam onde estão)`
+            : "Casos do BrowserStack passam a rodar o robot no mestre",
+        }
+      }
       case "set_settings": {
         this.settings = { ...this.settings, maxParallel: c.maxParallel }
         await writeJsonAtomic(this.p.settings, this.settings)
@@ -850,6 +889,22 @@ export class Runner {
           message: c.enabled ? "Máquina ativada: volta a receber casos" : busyThere ? "Máquina drenando: termina os casos atuais e não recebe novos" : "Máquina desativada",
         }
       }
+      case "set_machine_run_robot": {
+        try {
+          await this.remote.setRunRobot(c.id, c.enabled)
+        } catch (e) {
+          return { ok: false, message: (e as Error).message }
+        }
+        const ready = this.remote.robotReady(c.id)
+        return {
+          ok: true,
+          message: c.enabled
+            ? ready
+              ? "Robot dos casos desta máquina passa a rodar nela (tira carga do mestre)"
+              : "Ligado, mas o robot ainda não está instalado no worker: os casos seguem rodando o robot no mestre"
+            : "Robot dos casos desta máquina volta a rodar no mestre",
+        }
+      }
       case "test_machine": {
         return this.remote.test(c.id)
       }
@@ -924,7 +979,7 @@ export class Runner {
     )
     // desativada e sem casos rodando: termina de drenar
     for (const m of this.remote.machines()) {
-      if (!m.enabled && ![...this.running.values()].some((r) => r.machineId === m.id)) this.remote.drained(m.id)
+      if (!m.enabled && ![...this.running.values()].some((r) => r.machineId === m.id || r.remote?.host === m.id)) this.remote.drained(m.id)
     }
   }
 
@@ -1215,9 +1270,16 @@ export class Runner {
         ),
       )
     }
+    // robot do BrowserStack escolhido para rodar num worker: com ele fora do ar os casos esperam (não voltam a
+    // pesar no mestre sem o usuário pedir)
+    const bsHost = this.robotHostFor(BS_MACHINE_ID)
+    if (bsHost === null && this.bs.enabled && Date.now() - this.lastBsHostLog > 60_000) {
+      this.lastBsHostLog = Date.now()
+      this.log(`BrowserStack: robot configurado para ${this.bs.runOn}, que não está pronto (offline ou sem robot): casos aguardam`)
+    }
     budget.set(
       BS_MACHINE_ID,
-      this.bs.enabled && this.ad.browserstack.configured
+      this.bs.enabled && this.ad.browserstack.configured && bsHost !== null
         ? bsBudget({
             freeSlots: free.filter((f) => f.machineId === BS_MACHINE_ID).length,
             ourRunning: [...this.running.values()].filter((r) => r.cloud).length,
@@ -1228,7 +1290,7 @@ export class Runner {
     )
     const usable = interleaveByMachine(free.filter((f) => (budget.get(f.machineId ?? "") ?? Infinity) > 0))
     if (usable.length === 0) return
-    // memória do MESTRE: o robot de todo caso (inclusive de celular remoto) roda aqui
+    // memória do MESTRE: o robot roda aqui, salvo quando a máquina do celular roda o próprio robot
     let memMb = await this.ad.farm.memAvailableMb()
     // limite de casos ao mesmo tempo (painel → Máquinas): o robot de todo caso roda neste servidor
     let slots = this.settings.maxParallel > 0 ? this.settings.maxParallel - this.running.size : Infinity
@@ -1253,10 +1315,14 @@ export class Runner {
       const key = dev.machineId ?? ""
       if ((budget.get(key) ?? Infinity) <= 0) continue
       if (!(await this.preflight(a.serial, dev.index))) continue // caso continua na fila para outro celular
+      const host = this.robotHostFor(dev.machineId)
+      if (host === null) continue
       await this.startAttempt(a, dev.index, dev.machineId)
       budget.set(key, (budget.get(key) ?? Infinity) - 1)
+      // robot rodando num worker: a memória dele sai de lá (vaga do BrowserStack desconta do worker escolhido)
+      if (host && host !== key) budget.set(host, (budget.get(host) ?? Infinity) - 1)
       slots--
-      memMb -= dev.machineId ? this.cfg.robotMemMb : this.cfg.caseMemMb
+      memMb -= host ? 0 : dev.machineId ? this.cfg.robotMemMb : this.cfg.caseMemMb
     }
   }
 
@@ -1319,6 +1385,18 @@ export class Runner {
       snap = q.snapshotHash && fs.existsSync(dir) ? { hash: q.snapshotHash, dir } : await this.ad.snapshots.ensure()
     }
     if (this.cfg.fake) snap = await this.ad.snapshots.ensure()
+    const host = this.robotHostFor(machineId)
+    if (host === null) return
+    const agent = host ? this.remote.client(host) : null
+    if (host && !agent) return
+    if (host) {
+      try {
+        await agent!.ensureWorkspace(snap.hash, snap.dir) // 1 envio por revisão do projeto
+      } catch (e) {
+        this.log(`não consegui enviar o projeto para ${host}: ${(e as Error).message} — caso fica na fila`)
+        return
+      }
+    }
     const n = it.attempts.length + 1
     const dir = this.p.attemptDir(q.id, it.id, n)
     await fsp.mkdir(dir, { recursive: true })
@@ -1337,7 +1415,7 @@ export class Runner {
       ANDROID_SDK_ROOT: this.cfg.sdkRoot,
       JAVA_HOME: this.cfg.javaHome,
     }
-    const env = buildRobotEnv(baseEnv, {
+    const robotVars = {
       AMBIENTE: q.env,
       // celular de worker: serial e índice LOCAIS da máquina (o Appium roda lá) e a URL pelo túnel
       QAFARM_SERIAL: machineId ? parseDeviceKey(a.serial, this.remote.ids()).serial : a.serial,
@@ -1346,20 +1424,40 @@ export class Runner {
       QAFARM_APP_PACKAGE: meta.package,
       QAFARM_APP_ACTIVITY: meta.launchableActivity,
       ...this.bsEnv(a.serial, q.name, it.name, meta),
-    })
+    }
+    // robot no worker: o agente completa PATH/SDK/Java com os caminhos de lá (e a URL do Appium local dele)
+    const env = host ? buildRobotEnv({}, robotVars) : buildRobotEnv(baseEnv, robotVars)
+    const appiumIndex = host && machineId !== BS_MACHINE_ID ? splitIndex(index).local : undefined
+    if (appiumIndex) delete env.QAFARM_APPIUM_URL
     // "Esperas ×N" da fila: multiplica as variáveis de espera do projeto sem alterar o projeto
     const factor = q.options.waitFactor ?? 1
     const timeoutText = factor > 1 ? await fsp.readFile(path.join(snap.dir, this.cfg.robotTimeoutFile), "utf8").catch(() => "") : ""
     const args = buildRobotArgs({
       extraVars: scaledTimeoutArgs(parseTimeoutVariables(timeoutText), factor),
-      listenerPath: path.join(this.cfg.repoRoot, "scripts/robot/qafarm_listener.py"),
-      massaListenerPath: path.join(this.cfg.repoRoot, "scripts/robot/qafarm_massa.py"),
+      listenerPath: path.join(host ? RUN_REPO : this.cfg.repoRoot, "scripts/robot/qafarm_listener.py"),
+      massaListenerPath: path.join(host ? RUN_REPO : this.cfg.repoRoot, "scripts/robot/qafarm_massa.py"),
       env: q.env,
       fileLongName: it.fileLongName,
-      outputDir: dir,
+      outputDir: host ? RUN_OUT : dir,
       suiteFile: it.file,
     })
-    const spawned = this.ad.robot.spawn({ args, env, cwd: snap.dir, consoleFile: path.join(dir, "console.log") })
+    let pgid = 0
+    let remote: RemoteRun | undefined
+    let exited: Promise<{ code: number | null }> | undefined
+    if (host) {
+      const runId = `${q.id}__${it.id}__${n}`.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 200)
+      try {
+        await agent!.runStart({ runId, workspace: snap.hash, args, env, appiumIndex })
+      } catch (e) {
+        this.log(`não consegui iniciar o robot em ${host}: ${(e as Error).message} — caso fica na fila`)
+        return
+      }
+      remote = { host, runId, offset: 0, lastOkAt: Date.now(), polling: false, finishing: false }
+    } else {
+      const spawned = this.ad.robot.spawn({ args, env, cwd: snap.dir, consoleFile: path.join(dir, "console.log") })
+      pgid = spawned.pid
+      exited = spawned.exited
+    }
     const startedAt = new Date().toISOString()
     const relDir = path.relative(this.p.runs, dir)
     const qemuPid = machineId ? this.devices.get(a.serial)?.qemuPid : (await this.ad.farm.qemuPids()).get(index)
@@ -1372,7 +1470,8 @@ export class Runner {
       index,
       machineId,
       cloud,
-      pgid: spawned.pid,
+      pgid,
+      remote,
       dir,
       qemuPid,
       timedOut: false,
@@ -1386,7 +1485,7 @@ export class Runner {
       ...cur,
       items: cur.items.map((i) =>
         i.id === it.id
-          ? { ...i, status: "running", attempts: [...i.attempts, { n, serial: a.serial, startedAt, status: "running", dir: relDir, pgid: spawned.pid, machineId }] }
+          ? { ...i, status: "running", attempts: [...i.attempts, { n, serial: a.serial, startedAt, status: "running", dir: relDir, pgid: pgid || undefined, machineId, robotOn: host }] }
           : i,
       ),
     }))
@@ -1398,11 +1497,120 @@ export class Runner {
         this.kill(ra)
       }, q.options.timeoutSec * 1000),
     )
-    this.log(`▶ ${q.id}/${it.id} "${it.name}" em ${a.serial} (tentativa ${n})`)
-    void spawned.exited.then((res) => this.finishAttempt(ra, res.code))
+    this.log(`▶ ${q.id}/${it.id} "${it.name}" em ${a.serial} (tentativa ${n}${host ? `, robot em ${host}` : ""})`)
+    if (exited) void exited.then((res) => this.finishAttempt(ra, res.code))
+    else ra.timers.push(setInterval(() => void this.pollRemoteRun(ra), this.opts.remotePollMs ?? REMOTE_POLL_MS))
+  }
+
+  /**
+   * Onde roda o robot do caso: undefined = mestre; id = worker; null = ninguém agora (o caso espera).
+   * Celular de worker com "Robot nesta máquina" ligado e venv instalado → no próprio worker; BrowserStack →
+   * a máquina escolhida no card (se ela não estiver pronta, espera em vez de voltar a pesar no mestre).
+   */
+  private robotHostFor(machineId?: string): string | undefined | null {
+    if (machineId === BS_MACHINE_ID) {
+      const id = this.bs.runOn
+      if (!id) return undefined
+      return this.remote.canRunRobot(id) ? id : null
+    }
+    return machineId && this.remote.runsRobot(machineId) ? machineId : undefined
+  }
+
+  /** Acompanha o robot no worker: status (renova o lease), console ao vivo e fim. */
+  private async pollRemoteRun(ra: RunningAttempt): Promise<void> {
+    const rr = ra.remote!
+    if (rr.polling || rr.finishing) return
+    rr.polling = true
+    try {
+      const c = this.remote.client(rr.host)
+      if (!c) throw new Error("máquina sem agente")
+      const st = await c.runStatus(rr.runId)
+      rr.lastOkAt = Date.now()
+      await this.pullRemoteConsole(ra)
+      // BrowserStack: a sessão atual fica copiada aqui para o mestre fechá-la mesmo se o worker cair
+      if (ra.cloud) {
+        const buf = await c.runFile(rr.runId, "session.json").catch(() => null)
+        if (buf?.length) await fsp.writeFile(path.join(ra.dir, "session.json"), buf)
+      }
+      if (!st || st.state === "exited") {
+        rr.finishing = true
+        await this.finishAttempt(ra, st?.code ?? null)
+      }
+    } catch (e) {
+      const silent = Date.now() - rr.lastOkAt
+      if (silent > this.cfg.remoteOfflineMs * 2 && !rr.finishing) {
+        this.log(`${rr.host} sem resposta há ${Math.round(silent / 1000)} s durante ${ra.queueId}/${ra.itemId} (${(e as Error).message}): caso volta para a fila`)
+        rr.finishing = true
+        rr.unreachable = true
+        ra.deviceLost = true
+        await this.finishAttempt(ra, null)
+      }
+    } finally {
+      rr.polling = false
+    }
+  }
+
+  private async pullRemoteConsole(ra: RunningAttempt): Promise<void> {
+    const rr = ra.remote!
+    const buf = await this.remote.client(rr.host)?.runFile(rr.runId, "console.log", rr.offset).catch(() => null)
+    if (!buf?.length) return
+    await fsp.appendFile(path.join(ra.dir, "console.log"), buf)
+    rr.offset += buf.length
+  }
+
+  /** Traz os artefatos do worker para runs/ do mestre e apaga a cópia de lá. */
+  private async collectRemoteRun(ra: RunningAttempt): Promise<void> {
+    const rr = ra.remote!
+    const c = this.remote.client(rr.host)
+    if (!c) return
+    try {
+      await this.pullRemoteConsole(ra)
+      const root = path.resolve(ra.dir)
+      for (const f of await c.runFiles(rr.runId)) {
+        if (f.name === "console.log") continue
+        const dest = path.resolve(root, f.name)
+        if (!dest.startsWith(`${root}${path.sep}`)) continue
+        if (f.size > REMOTE_FILE_MAX) {
+          this.log(`artefato ${f.name} de ${ra.queueId}/${ra.itemId} grande demais (${Math.round(f.size / 1048576)} MB): ficou em ${rr.host}`)
+          continue
+        }
+        await fsp.mkdir(path.dirname(dest), { recursive: true })
+        await fsp.writeFile(dest, await c.runFile(rr.runId, f.name))
+      }
+      await c.runDelete(rr.runId)
+    } catch (e) {
+      this.log(`não consegui trazer os artefatos de ${ra.queueId}/${ra.itemId} de ${rr.host}: ${(e as Error).message}`)
+      this.remoteCleanup.push({ host: rr.host, runId: rr.runId, since: Date.now() })
+    }
+  }
+
+  /** Encerra e apaga robots de worker que ficaram para trás (tenta por até 30 min). */
+  private async processRemoteCleanup(): Promise<void> {
+    if (!this.remoteCleanup.length) return
+    const pending = this.remoteCleanup
+    this.remoteCleanup = []
+    for (const r of pending) {
+      const c = this.remote.client(r.host)
+      const ok = c
+        ? await c
+            .runKill(r.runId, "SIGKILL")
+            .then(() => c.runDelete(r.runId))
+            .then(() => true)
+            .catch((e: Error) => /desconhecida/.test(e.message))
+        : false
+      if (ok) this.log(`robot ${r.runId} encerrado em ${r.host}`)
+      else if (Date.now() - r.since < 30 * 60_000) this.remoteCleanup.push(r)
+    }
   }
 
   private kill(ra: RunningAttempt): void {
+    if (ra.remote) {
+      const { host, runId } = ra.remote
+      const c = this.remote.client(host)
+      void c?.runKill(runId, "SIGTERM").catch(() => undefined)
+      ra.timers.push(setTimeout(() => void c?.runKill(runId, "SIGKILL").catch(() => undefined), 10_000))
+      return
+    }
     killGroup(ra.pgid, "SIGTERM")
     ra.timers.push(setTimeout(() => killGroup(ra.pgid, "SIGKILL"), 10_000))
   }
@@ -1410,6 +1618,8 @@ export class Runner {
   private async finishAttempt(ra: RunningAttempt, exitCode: number | null): Promise<void> {
     for (const t of ra.timers) clearTimeout(t)
     killGroup(ra.pgid, "SIGKILL") // garante que nenhum filho ficou para trás
+    if (ra.remote && !ra.remote.unreachable) await this.collectRemoteRun(ra)
+    else if (ra.remote) this.remoteCleanup.push({ host: ra.remote.host, runId: ra.remote.runId, since: Date.now() })
     const read = (f: string) => fsp.readFile(path.join(ra.dir, f), "utf8").catch(() => undefined)
     const outputXml = await read("output.xml")
     const consoleFull = (await read("console.log")) ?? ""
@@ -1456,6 +1666,7 @@ export class Runner {
   killAllRunning(): void {
     for (const ra of this.running.values()) {
       for (const t of ra.timers) clearTimeout(t)
+      if (ra.remote) void this.remote.client(ra.remote.host)?.runKill(ra.remote.runId, "SIGKILL").catch(() => undefined)
       killGroup(ra.pgid, "SIGKILL")
     }
   }

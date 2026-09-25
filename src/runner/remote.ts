@@ -176,6 +176,17 @@ export class RemoteMachines {
     const r = this.rt.get(id)
     return !!r && (r.state === "online" || r.state === "degraded" || r.draining) && r.lastSeenAt !== undefined && Date.now() - r.lastSeenAt < this.cfg.remoteOfflineMs
   }
+  /** Robot dos celulares desta máquina roda nela agora: opção ligada, venv instalado e máquina online. */
+  runsRobot(id: string): boolean {
+    return !!this.rt.get(id)?.m.runRobot && this.canRunRobot(id)
+  }
+  /** Worker online e com o robot instalado (ex.: para os casos do BrowserStack). */
+  canRunRobot(id: string): boolean {
+    return this.robotReady(id) && this.isOnline(id)
+  }
+  robotReady(id: string): boolean {
+    return !!this.rt.get(id)?.lastState?.robot?.ready
+  }
   memAvailableMb(id: string): number | null {
     const s = this.rt.get(id)?.lastState?.metrics
     return s ? s.memAvailableMb : null
@@ -386,6 +397,7 @@ export class RemoteMachines {
       token: input.token ?? randomBytes(32).toString("hex"),
       transport: input.directUrl ? "direct" : "ssh",
       directUrl: input.directUrl,
+      runRobot: false,
       createdAt: new Date().toISOString(),
     }
     this.upsertRuntime(m, 0)
@@ -407,6 +419,13 @@ export class RemoteMachines {
     r.m = { ...r.m, enabled }
     r.draining = !enabled && hasRunning
     if (enabled) r.state = "connecting"
+    await this.save()
+  }
+
+  async setRunRobot(id: string, runRobot: boolean): Promise<void> {
+    const r = this.rt.get(id)
+    if (!r) throw new Error("Máquina não encontrada")
+    r.m = { ...r.m, runRobot }
     await this.save()
   }
 
@@ -527,6 +546,8 @@ export class RemoteMachines {
         emulators: emus,
         farmJob: this.farmJob(r.m.id),
         versions: r.lastState?.versions,
+        robotReady: r.lastState?.robot?.ready,
+        robotRuns: r.lastState?.robot?.runs,
       }
     })
   }

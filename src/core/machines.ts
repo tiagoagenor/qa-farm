@@ -27,6 +27,8 @@ export const MachineSchema = z.object({
   /** ssh = túnel aberto pelo mestre; direct = URL direta (modo fake/testes) */
   transport: z.enum(["ssh", "direct"]),
   directUrl: z.string().optional(),
+  /** o robot dos casos nos celulares desta máquina roda nela mesma (tira carga do mestre) */
+  runRobot: z.boolean().default(false),
   createdAt: z.string(),
 })
 export type Machine = z.infer<typeof MachineSchema>
@@ -51,6 +53,10 @@ export const MachineStatusSchema = z.object({
   emulators: z.number().int(),
   farmJob: z.object({ command: z.string(), startedAt: z.string() }).optional(),
   versions: z.object({ emulator: z.string().optional(), appium: z.string().optional() }).optional(),
+  /** venv do robot instalado no worker */
+  robotReady: z.boolean().optional(),
+  /** robots rodando agora no worker */
+  robotRuns: z.number().int().optional(),
 })
 export type MachineStatus = z.infer<typeof MachineStatusSchema>
 export const MachinesStatusFileSchema = z.object({ updatedAt: z.string(), machines: z.array(MachineStatusSchema) })

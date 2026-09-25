@@ -57,7 +57,7 @@ export async function makeHarness(opts: { emulators?: number; physical?: string[
     uploadedAt: "2026-09-24T10:00:00.000Z",
   })
   const logs: string[] = []
-  const runner = new Runner(cfg, createAdapters(cfg), (m) => logs.push(m), { deviceRefreshMs: 100 })
+  const runner = new Runner(cfg, createAdapters(cfg), (m) => logs.push(m), { deviceRefreshMs: 100, remotePollMs: 150 })
   await runner.init()
 
   async function tickUntil<T>(fn: () => Promise<T | undefined | false> | T | undefined | false, timeoutMs = 15_000): Promise<T> {

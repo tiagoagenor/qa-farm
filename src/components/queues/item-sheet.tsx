@@ -119,6 +119,11 @@ export function ItemSheet({
                         <div>
                           <p className="text-muted-foreground text-xs">Celular</p>
                           <p className="font-mono text-xs">{current.serial}</p>
+                          {current.robotOn && (
+                            <p className="text-muted-foreground text-[11px]" data-testid="attempt-robot-on">
+                              robot em {current.robotOn}
+                            </p>
+                          )}
                         </div>
                         <div>
                           <p className="text-muted-foreground text-xs">Início</p>

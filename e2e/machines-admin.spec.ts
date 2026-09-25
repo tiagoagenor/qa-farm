@@ -81,3 +81,33 @@ test("adicionar máquina pela tela valida o ID e mostra o comando para autorizar
   await expect(page.getByTestId("authorize-command")).toContainText(">> ~/.ssh/authorized_keys")
   await expect(page.getByTestId("machine-save")).toBeDisabled()
 })
+
+test("ligar 'robot nesta máquina' no worker: a linha mostra 'aqui' e o BrowserStack pode rodar o robot nele", async ({ page }) => {
+  // Arrange
+  await command(page.request, {
+    type: "add_machine",
+    id: "server02",
+    name: "server02",
+    host: "127.0.0.1",
+    sshUser: "server02",
+    sshPort: 22,
+    maxDevices: 6,
+    directUrl: WORKER.url,
+    token: WORKER.token,
+  })
+  await page.goto("/maquinas")
+  const row = page.locator('[data-testid="machine-row"][data-machine="server02"]')
+  await expect(row).toHaveAttribute("data-state", "online", { timeout: 20_000 })
+
+  // Act
+  await row.getByTestId("machine-run-robot").click()
+  await page.getByTestId("bs-run-on-select").click()
+  await page.getByRole("option", { name: "server02" }).click()
+
+  // Assert
+  await expect(row.getByTestId("machine-robot")).toContainText("aqui")
+  await expect(page.getByTestId("bs-run-on-select")).toContainText("server02")
+  const bs = await (await page.request.get("/api/browserstack")).json()
+  expect(bs.runOn).toBe("server02")
+  await command(page.request, { type: "bs_set_run_on", machineId: null })
+})

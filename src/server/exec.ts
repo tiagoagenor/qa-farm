@@ -53,6 +53,8 @@ export function isAlive(pid: number | undefined): boolean {
 
 /** Mata um grupo de processos (pgid) com o sinal dado. Ignora se já morreu. */
 export function killGroup(pgid: number, signal: NodeJS.Signals = "SIGTERM"): void {
+  // 0/1/negativo mataria o próprio grupo do runner (ou tudo): caso sem processo local (robot no worker) usa 0
+  if (!Number.isInteger(pgid) || pgid <= 1) return
   try {
     process.kill(-pgid, signal)
   } catch {

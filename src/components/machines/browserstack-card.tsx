@@ -12,8 +12,11 @@ import { Switch } from "@/components/ui/switch"
 import { usePoll } from "@/hooks/use-poll"
 import { sendCommand } from "@/lib/client"
 
+import type { MachinesDto } from "./machine-admin"
+
 interface BsDto {
   enabled: boolean
+  runOn?: string
   slots: Array<{ id: number; device: string; osVersion: string; enabled: boolean }>
   status: {
     updatedAt: string
@@ -33,6 +36,7 @@ interface BsDto {
 /** BrowserStack como mais uma fonte de celulares: liga/desliga, vagas (modelo + Android) e uso da conta. */
 export function BrowserStackCard() {
   const { data, reload } = usePoll<BsDto>("/api/browserstack", 4000)
+  const { data: machines } = usePoll<MachinesDto>("/api/machines", 10_000)
   const [busy, setBusy] = useState(false)
   const [pick, setPick] = useState("")
   const options = useMemo(
@@ -111,6 +115,32 @@ export function BrowserStackCard() {
             {st?.error && <span className="text-red-700 dark:text-red-400">{st.error}</span>}
           </div>
         )}
+
+        <div className="flex flex-wrap items-center gap-3" data-testid="bs-run-on">
+          <Label className="text-sm">Robot dos casos roda em</Label>
+          <Select
+            value={data?.runOn ?? "__master"}
+            disabled={busy || !machines}
+            onValueChange={(v) => run({ type: "bs_set_run_on", machineId: v === "__master" ? null : v })}
+          >
+            <SelectTrigger className="w-64" data-testid="bs-run-on-select">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__master">{machines?.master.id ?? "mestre"} (mestre)</SelectItem>
+              {(machines?.machines ?? []).map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name}
+                  {m.status?.robotReady === false ? " (robot não instalado)" : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-muted-foreground text-xs">
+            O celular fica na nuvem; só o processo do Robot roda aqui. Com a máquina escolhida fora do ar, os casos do
+            BrowserStack esperam.
+          </span>
+        </div>
 
         <div className="grid gap-2">
           <p className="font-medium">Vagas</p>

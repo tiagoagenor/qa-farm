@@ -13,12 +13,17 @@ import {
   FarmOpRequestSchema,
   InstallRequestSchema,
   PROTOCOL_HEADER,
+  RUN_ID_RE,
+  RunRequestSchema,
+  WORKSPACE_RE,
 } from "@/core/agent-protocol"
 import type { Config } from "@/core/config"
 import { MetricsHistory } from "@/core/metrics"
 import { parseAdbDevices } from "@/core/parsers/adb-devices"
 import type { Adapters } from "@/server/adapters"
 import { describeOp, type FarmOp } from "@/server/farm"
+
+import { RunManager } from "./runs"
 
 // Agente do worker: HTTP em 127.0.0.1 (o mestre chega por túnel SSH). Implementa, remotamente, as mesmas
 // operações que o runner faz localmente: adb, fazenda de emuladores, Appium, cache de APK e métricas.
@@ -34,6 +39,8 @@ export interface AgentOptions {
   /** pasta dos APKs recebidos do mestre (guarda os 3 últimos) */
   apkDir: string
   log?: (m: string) => void
+  /** lease dos robots (testes encurtam) */
+  runLeaseMs?: number
 }
 
 const MD5_RE = /^[a-f0-9]{32}$/
@@ -91,6 +98,10 @@ export async function startAgent(o: AgentOptions): Promise<{ server: http.Server
     for (const f of files.sort((a, b) => b.t - a.t).slice(KEEP_APKS)) await fsp.rm(path.join(o.apkDir, `${f.m}.apk`), { force: true })
   }
 
+  // ---- robot no worker
+  const runs = new RunManager({ cfg: o.cfg, ad: o.ad, log, leaseMs: o.runLeaseMs })
+  await runs.init()
+
   const qemuPids = async () => Object.fromEntries([...(await o.ad.farm.qemuPids()).entries()].map(([k, v]) => [String(k), v]))
 
   const server = http.createServer(async (req, res) => {
@@ -127,6 +138,7 @@ export async function startAgent(o: AgentOptions): Promise<{ server: http.Server
           apks: await listApks(),
           metrics: lastSample,
           versions: {},
+          robot: { ready: runs.robotReady, runs: runs.runningCount },
         }
         return send(200, st)
       }
@@ -232,6 +244,59 @@ export async function startAgent(o: AgentOptions): Promise<{ server: http.Server
         }
       }
 
+      // ---- snapshot do projeto (tar.gz) e execuções do robot
+      if (a === "workspaces" && b) {
+        if (!WORKSPACE_RE.test(b)) return send(400, { error: "snapshot inválido" })
+        if (m === "HEAD") {
+          res.writeHead(runs.hasWorkspace(b) ? 200 : 404)
+          return res.end()
+        }
+        if (m === "PUT") {
+          await runs.receiveWorkspace(b, req)
+          return send(201, { ok: true })
+        }
+      }
+      if (a === "runs") {
+        if (m === "POST" && !b) {
+          const r = RunRequestSchema.safeParse(await body())
+          if (!r.success) return send(400, { error: r.error.issues[0]?.message })
+          try {
+            return send(202, await runs.start(r.data))
+          } catch (e) {
+            return send(409, { error: (e as Error).message })
+          }
+        }
+        if (!b || !RUN_ID_RE.test(b)) return send(400, { error: "execução inválida" })
+        if (m === "GET" && !c) {
+          const st = runs.status(b)
+          return st ? send(200, st) : send(404, { error: "execução desconhecida" })
+        }
+        if (m === "POST" && c === "kill") {
+          const { signal } = (await body()) as { signal?: string }
+          return runs.kill(b, signal === "SIGKILL" ? "SIGKILL" : "SIGTERM") ? send(200, { ok: true }) : send(404, { error: "execução desconhecida" })
+        }
+        if (m === "DELETE" && !c) {
+          await runs.remove(b)
+          return send(200, { ok: true })
+        }
+        if (m === "GET" && c === "files") {
+          const name = url.searchParams.get("name")
+          if (!name) {
+            const files = await runs.files(b)
+            return files ? send(200, { files }) : send(404, { error: "execução desconhecida" })
+          }
+          const file = runs.filePath(b, name)
+          if (!file) return send(404, { error: "arquivo inválido" })
+          const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0) || 0)
+          const st = await fsp.stat(file).catch(() => null)
+          if (!st) return send(404, { error: "arquivo não existe" })
+          res.writeHead(200, { "Content-Type": "application/octet-stream", "Cache-Control": "no-store", "X-QAFarm-Size": String(st.size) })
+          if (offset >= st.size) return res.end()
+          fs.createReadStream(file, { start: offset }).pipe(res)
+          return
+        }
+      }
+
       // ---- logs (diagnóstico)
       if (m === "GET" && a === "logs" && b && /^[a-z0-9-]+$/.test(b)) {
         const file = path.join(o.cfg.dataDir, "logs", `${b}.log`)
@@ -254,6 +319,7 @@ export async function startAgent(o: AgentOptions): Promise<{ server: http.Server
     url: `http://${o.host ?? "127.0.0.1"}:${addr.port}`,
     close: async () => {
       clearInterval(metricsTimer)
+      runs.close()
       // fecha também as conexões keep-alive do mestre: sem isso o agente "parado" seguia respondendo nelas
       // e o mestre continuava vendo a máquina online
       const closed = new Promise<void>((r) => server.close(() => r()))
