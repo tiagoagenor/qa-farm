@@ -39,6 +39,12 @@ QAFARM_DEVICES_PER_APPIUM=5
 QAFARM_INSTALL_CONCURRENCY=5
 ENV
 
+echo "==> ajustando o Appium copiado do mestre (caminhos absolutos /home/<outro usuário>)"
+"${SSH[@]}" "$DEST" 'f=~/.appium/node_modules/.cache/appium/extensions.yaml
+  [ -f "$f" ] && sed -i -E "s#/home/[^/]+/\.appium/#$HOME/.appium/#g" "$f"
+  for l in $(find ~/.appium -path "*/node_modules/appium" -type l 2>/dev/null); do ln -sfn "$HOME/node/lib/node_modules/appium" "$l"; done
+  n=$(find ~/.appium ~/node -xtype l 2>/dev/null | wc -l); [ "$n" = 0 ] || echo "atenção: $n link(s) quebrado(s) em ~/.appium ou ~/node"'
+
 echo "==> crontab (a cada minuto + no boot) e reinício do agente"
 "${SSH[@]}" "$DEST" 'chmod +x ~/qa-farm-agent/scripts/ops/*.sh ~/qa-farm-agent/scripts/farm/*.sh
   L="~/qa-farm-agent/scripts/ops/agent-supervisor.sh start >/dev/null 2>&1"
