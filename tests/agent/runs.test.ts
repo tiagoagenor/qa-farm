@@ -116,6 +116,23 @@ describe("robot no worker (agente)", () => {
     expect([tail.toString(), none.length]).toEqual([full.subarray(full.length - 10).toString(), 0])
   })
 
+  it("snapshot somente leitura do mestre (raiz inclusive) é recebido e fica pronto", async () => {
+    // Arrange
+    const { client, dir } = await agent()
+    const ro = path.join(dir, "snapshot-ro")
+    await fs.cp(PROJECT, ro, { recursive: true })
+    const { run } = await import("@/server/exec")
+    await run("chmod", ["-R", "a-w", ro])
+    cleanups.push(() => run("chmod", ["-R", "u+w", ro]).then(() => undefined))
+
+    // Act
+    await client.ensureWorkspace(WS, ro)
+    const st = await client.runStart(request("q1__i6__1", "Suite.CT_LOGIN_01-Caso-PASS"))
+
+    // Assert
+    expect(st.state).toBe("running")
+  })
+
   it("sem o projeto no worker, recusa iniciar", async () => {
     // Arrange
     const { client } = await agent()

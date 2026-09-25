@@ -94,6 +94,8 @@ export class RunManager {
       await fsp.mkdir(tmp, { recursive: true, mode: 0o700 })
       const r = await run("tar", ["-xzf", tgz, "-C", tmp, "--no-same-owner"], { timeoutMs: 120_000 })
       if (r.code !== 0) throw new Error(`tar falhou: ${r.stderr.slice(0, 300)}`)
+      // o snapshot do mestre é somente leitura (inclusive a raiz, que o tar reaplica): libera só a raiz para a marca
+      await fsp.chmod(tmp, 0o700)
       await fsp.writeFile(path.join(tmp, READY_MARK), new Date().toISOString())
       await fsp.rename(tmp, path.join(this.wsDir, hash)).catch(async () => {
         await this.rmTree(tmp) // outro envio publicou antes

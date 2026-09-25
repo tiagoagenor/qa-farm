@@ -93,6 +93,7 @@ const DEVICE_REFRESH_MS = 2000
 const REMOTE_POLL_MS = 3000
 /** arquivo de artefato maior que isso não é copiado do worker */
 const REMOTE_FILE_MAX = 200 * 1024 * 1024
+const WORKSPACE_RETRY_MS = 2 * 60_000
 const INSTALL_RETRY_MS = 3 * 60_000
 /** Janelas de erro do Android que bloqueiam a tela (ANR / app parou). */
 export const ERROR_DIALOG_RE = /Application Not Responding|Application Error|isn.t responding|has stopped|keeps stopping/i
@@ -149,6 +150,8 @@ export class Runner {
   /** robots de worker a encerrar/apagar (mestre reiniciou, worker sumiu no meio do caso) */
   private remoteCleanup: Array<{ host: string; runId: string; since: number }> = []
   private lastBsHostLog = 0
+  /** envio do projeto para o worker falhou: por um tempo o robot dos celulares dele volta para o mestre */
+  private workspaceFailAt = new Map<string, number>()
   private bsPlan: BsPlan | null = null
   private bsPlanAt = 0
   private bsError?: string
@@ -1393,7 +1396,8 @@ export class Runner {
       try {
         await agent!.ensureWorkspace(snap.hash, snap.dir) // 1 envio por revisão do projeto
       } catch (e) {
-        this.log(`não consegui enviar o projeto para ${host}: ${(e as Error).message} — caso fica na fila`)
+        this.workspaceFailAt.set(host, Date.now())
+        this.log(`não consegui enviar o projeto para ${host}: ${(e as Error).message} — por ${WORKSPACE_RETRY_MS / 60_000} min o robot dos celulares dele roda no mestre`)
         return
       }
     }
@@ -1508,12 +1512,13 @@ export class Runner {
    * a máquina escolhida no card (se ela não estiver pronta, espera em vez de voltar a pesar no mestre).
    */
   private robotHostFor(machineId?: string): string | undefined | null {
+    const failedRecently = (id: string) => Date.now() - (this.workspaceFailAt.get(id) ?? 0) < WORKSPACE_RETRY_MS
     if (machineId === BS_MACHINE_ID) {
       const id = this.bs.runOn
       if (!id) return undefined
-      return this.remote.canRunRobot(id) ? id : null
+      return this.remote.canRunRobot(id) && !failedRecently(id) ? id : null
     }
-    return machineId && this.remote.runsRobot(machineId) ? machineId : undefined
+    return machineId && this.remote.runsRobot(machineId) && !failedRecently(machineId) ? machineId : undefined
   }
 
   /** Acompanha o robot no worker: status (renova o lease), console ao vivo e fim. */
