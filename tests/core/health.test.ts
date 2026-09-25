@@ -65,15 +65,15 @@ describe("evaluateHealth", () => {
     expect([still.level, cooledShort.level, cooledLong.level, cooledLong.brake]).toEqual(["crit", "crit", "ok", false])
   })
 
-  it("swap 95% ocupado é crítico", () => {
+  it("swap cheio sem troca ativa é só aviso e não freia (páginas antigas paradas no swap)", () => {
     // Arrange
-    const s = sample({ swapUsedMb: 3900 })
+    const s = sample({ swapUsedMb: 4096 })
 
     // Act
     const r = evaluateHealth(s, {}, T0)
 
     // Assert
-    expect([r.level, r.brake]).toEqual(["crit", true])
+    expect([r.level, r.brake]).toEqual(["warn", false])
   })
 
   it("troca intensa com o swap por só 10 s não dispara; por 30 s dispara", () => {

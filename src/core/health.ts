@@ -132,13 +132,15 @@ const RULES: Rule[] = [
     brakes: false, // o runner já freia por memória (com desconto por caso iniciado)
   },
   {
+    // swap OCUPADO é só aviso: costuma ser página antiga parada lá (falso alarme). O perigo real é trocar
+    // ativamente com o swap — regra "swapActive", que freia.
     id: "swap",
-    raw: (s, c) => (swapPct(s) > c.swapCritPct ? "crit" : swapPct(s) > c.swapWarnPct ? "warn" : "ok"),
+    raw: (s, c) => (swapPct(s) > c.swapWarnPct ? "warn" : "ok"),
     upMs: () => 0,
     clear: (s, c) => swapPct(s) < c.swapClearPct,
     clearMs: 0,
-    message: (s) => `Swap ${Math.round(swapPct(s))}% ocupado`,
-    brakes: true,
+    message: (s, _l, c) => `Swap ${Math.round(swapPct(s))}% ocupado${swapPct(s) > c.swapCritPct ? " (sem troca ativa, não freia)" : ""}`,
+    brakes: false,
   },
   {
     id: "swapActive",
