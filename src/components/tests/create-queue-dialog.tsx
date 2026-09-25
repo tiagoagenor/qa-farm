@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { getJson, sendCommand } from "@/lib/client"
+import { formatFactor, RETRY_OPTIONS, WAIT_FACTORS } from "@/lib/format"
 import { defaultQueueName } from "@/lib/queue-name"
 
 export function CreateQueueDialog({
@@ -35,6 +36,7 @@ export function CreateQueueDialog({
   const [retries, setRetries] = useState("0")
   const [closeAppAfter, setCloseAppAfter] = useState(true)
   const [allowSameAccount, setAllowSameAccount] = useState(true)
+  const [waitFactor, setWaitFactor] = useState("2")
   const [sending, setSending] = useState(false)
 
   useEffect(() => {
@@ -62,7 +64,7 @@ export function CreateQueueDialog({
     setSending(true)
     const res = await sendCommand({
       type: "create_queue",
-      input: { name: name.trim(), appId, env, timeoutSec, retries: Number(retries), closeAppAfter, allowSameAccount, testIds },
+      input: { name: name.trim(), appId, env, timeoutSec, retries: Number(retries), closeAppAfter, allowSameAccount, waitFactor: Number(waitFactor), testIds },
     })
     setSending(false)
     if (res?.ok && res.data?.queueId) {
@@ -137,7 +139,7 @@ export function CreateQueueDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {["0", "1", "2", "3"].map((r) => (
+                  {RETRY_OPTIONS.map(String).map((r) => (
                     <SelectItem key={r} value={r}>
                       {r}
                     </SelectItem>
@@ -145,6 +147,27 @@ export function CreateQueueDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div className="flex items-start justify-between gap-4 rounded-md border p-3">
+            <div className="grid gap-1">
+              <Label>Esperas do teste</Label>
+              <p className="text-muted-foreground text-xs">
+                Multiplica os tempos de espera do projeto (TIMEOUT_S, TIMEOUT, TIMEOUT_M, TIMEOUT_L…). Emulador é mais lento que o
+                aparelho físico; o teste só espera mais quando o elemento realmente demora.
+              </p>
+            </div>
+            <Select value={waitFactor} onValueChange={setWaitFactor}>
+              <SelectTrigger className="w-24" data-testid="queue-wait-factor">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {WAIT_FACTORS.map((f) => (
+                  <SelectItem key={f} value={String(f)}>
+                    {formatFactor(f)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex items-start justify-between gap-4 rounded-md border p-3">
             <div className="grid gap-1">

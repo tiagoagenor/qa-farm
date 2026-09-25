@@ -11,8 +11,8 @@ import { parseMassa } from "@/core/massa"
 import { nextPhysicalIndex, parseAdbDevices, serialFromIndex } from "@/core/parsers/adb-devices"
 import { classifyRun } from "@/core/parsers/robot-output"
 import { dataPaths } from "@/core/paths"
-import { applyResult, buildQueue, cancelQueue, failedTestIds, finalizeIfDone, reopenItem } from "@/core/queue-logic"
-import { buildRobotArgs, buildRobotEnv } from "@/core/robot-args"
+import { applyResult, buildQueue, cancelQueue, failedTestIds, finalizeIfDone, reopenItem, setQueueRetries } from "@/core/queue-logic"
+import { buildRobotArgs, buildRobotEnv, parseTimeoutVariables, scaledTimeoutArgs } from "@/core/robot-args"
 import { type Assignment, schedule } from "@/core/scheduler"
 import { listJsonFiles, readJson, writeJsonAtomic } from "@/core/store"
 import {
@@ -27,6 +27,8 @@ import {
   type Device,
   type DevicesState,
   EmulatorsDisabledSchema,
+  type Settings,
+  SettingsSchema,
   PhysicalStateSchema,
   type Queue,
   QueueSchema,
@@ -116,6 +118,8 @@ export class Runner {
   private readonly adb: Adb
   private readonly appium: AppiumPool
   private lastStatusWrite = 0
+  private settings: Settings = { maxParallel: 0 }
+  private lastParallelLog = 0
 
   constructor(
     private readonly cfg: Config,
@@ -202,6 +206,7 @@ export class Runner {
     await this.remote.ensureKey().catch((e: Error) => this.log(`não consegui criar a chave SSH do mestre: ${e.message}`))
     this.physical = new Map(Object.entries((await readJson(this.p.physical, PhysicalStateSchema, { enabled: {} })).enabled))
     this.disabledEmulators = new Set((await readJson(this.p.emulatorsDisabled, EmulatorsDisabledSchema, { disabled: [] })).disabled)
+    this.settings = await readJson(this.p.settings, SettingsSchema, { maxParallel: 0 })
     const saved = await readJson(this.p.metrics, MetricsFileSchema.nullable(), null)
     this.metricsHistory = new MetricsHistory(saved?.machines.find((m) => m.id === this.cfg.machineId)?.history ?? [])
     this.catalog = await readJson(this.p.catalog, CatalogSchema.nullable(), null)
@@ -495,8 +500,39 @@ export class Runner {
         if (ids.length === 0) return { ok: false, message: "Não há falhas para rodar de novo" }
         return this.handle({
           type: "create_queue",
-          input: { name: `${q.name} · re-run falhas`, appId: q.appId, env: q.env, timeoutSec: q.options.timeoutSec, retries: q.options.retries, closeAppAfter: q.options.closeAppAfter, allowSameAccount: q.options.allowSameAccount, testIds: ids },
+          input: { name: `${q.name} · re-run falhas`, appId: q.appId, env: q.env, timeoutSec: q.options.timeoutSec, retries: q.options.retries, closeAppAfter: q.options.closeAppAfter, allowSameAccount: q.options.allowSameAccount, waitFactor: q.options.waitFactor, testIds: ids },
         })
+      }
+      case "set_queue_retries": {
+        const q = this.queues.get(c.queueId)
+        if (!q) return { ok: false, message: "Fila não encontrada" }
+        const preview = setQueueRetries(q, c.retries)
+        if (preview.reopened > 0) {
+          const other = [...this.queues.values()].find(
+            (x) => x.id !== q.id && (x.status === "running" || x.status === "paused") && x.appId !== q.appId && x.items.some((i) => i.status === "queued" || i.status === "running"),
+          )
+          if (other) return { ok: false, message: `A fila "${other.name}" usa outro app. Aguarde ou cancele antes de rodar falhas de novo nesta.` }
+        }
+        this.updateQueue(q.id, (cur) => setQueueRetries(cur, c.retries).queue)
+        await this.pickActiveApp()
+        const parts = [`Tentativas extras: ${c.retries}`]
+        if (preview.reopened) parts.push(`${preview.reopened} caso(s) com falha voltaram para a fila`)
+        if (preview.reverted) parts.push(`${preview.reverted} nova(s) tentativa(s) cancelada(s)`)
+        return { ok: true, message: parts.join(" · "), data: { reopened: preview.reopened, reverted: preview.reverted } }
+      }
+      case "set_settings": {
+        this.settings = { ...this.settings, maxParallel: c.maxParallel }
+        await writeJsonAtomic(this.p.settings, this.settings)
+        return {
+          ok: true,
+          message: c.maxParallel ? `Máximo de ${c.maxParallel} caso(s) ao mesmo tempo (os que já estão rodando continuam)` : "Sem limite de casos ao mesmo tempo",
+        }
+      }
+      case "set_queue_wait_factor": {
+        const q = this.queues.get(c.queueId)
+        if (!q) return { ok: false, message: "Fila não encontrada" }
+        this.updateQueue(q.id, (cur) => ({ ...cur, options: { ...cur.options, waitFactor: c.waitFactor } }))
+        return { ok: true, message: `Esperas ×${c.waitFactor} a partir dos próximos casos` }
       }
       case "retry_item": {
         const q = this.queues.get(c.queueId)
@@ -1012,7 +1048,17 @@ export class Runner {
     if (usable.length === 0) return
     // memória do MESTRE: o robot de todo caso (inclusive de celular remoto) roda aqui
     let memMb = await this.ad.farm.memAvailableMb()
+    // limite de casos ao mesmo tempo (painel → Máquinas): o robot de todo caso roda neste servidor
+    let slots = this.settings.maxParallel > 0 ? this.settings.maxParallel - this.running.size : Infinity
+    if (slots <= 0) {
+      if (Date.now() - this.lastParallelLog > 60_000) {
+        this.lastParallelLog = Date.now()
+        this.log(`limite de ${this.settings.maxParallel} caso(s) ao mesmo tempo atingido: novos casos aguardam`)
+      }
+      return
+    }
     for (const a of schedule(queues, usable, running)) {
+      if (slots <= 0) break
       // sem memória livre, o caso espera na fila: com emuladores rodando teste o servidor pode travar (OOM)
       if (memMb < this.cfg.minFreeMemMb) {
         if (Date.now() - this.lastLowMemLog > 60_000) {
@@ -1027,6 +1073,7 @@ export class Runner {
       if (!(await this.preflight(a.serial, dev.index))) continue // caso continua na fila para outro celular
       await this.startAttempt(a, dev.index, dev.machineId)
       budget.set(key, (budget.get(key) ?? Infinity) - 1)
+      slots--
       memMb -= dev.machineId ? this.cfg.robotMemMb : this.cfg.caseMemMb
     }
   }
@@ -1116,7 +1163,11 @@ export class Runner {
       QAFARM_APP_PACKAGE: meta.package,
       QAFARM_APP_ACTIVITY: meta.launchableActivity,
     })
+    // "Esperas ×N" da fila: multiplica as variáveis de espera do projeto sem alterar o projeto
+    const factor = q.options.waitFactor ?? 1
+    const timeoutText = factor > 1 ? await fsp.readFile(path.join(snap.dir, this.cfg.robotTimeoutFile), "utf8").catch(() => "") : ""
     const args = buildRobotArgs({
+      extraVars: scaledTimeoutArgs(parseTimeoutVariables(timeoutText), factor),
       listenerPath: path.join(this.cfg.repoRoot, "scripts/robot/qafarm_listener.py"),
       massaListenerPath: path.join(this.cfg.repoRoot, "scripts/robot/qafarm_massa.py"),
       env: q.env,

@@ -50,6 +50,7 @@ export interface MachineRow {
 }
 export interface MachinesDto {
   master: { id: string }
+  settings: { maxParallel: number }
   publicKey: string | null
   machines: MachineRow[]
 }
@@ -235,6 +236,38 @@ function StartDialog({ m, onClose, onDone }: { m: MachineRow | null; onClose: ()
   )
 }
 
+/** Máximo de casos ao mesmo tempo no pool todo (o robot de todo caso roda no mestre). */
+function ParallelLimit({ value, onSaved }: { value: number; onSaved: () => void }) {
+  const [v, setV] = useState<string | null>(null)
+  const cur = v ?? String(value)
+  const n = Number(cur)
+  const ok = Number.isInteger(n) && n >= 0 && n <= 200 && n !== value
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2 text-sm" data-testid="parallel-limit">
+      <span className="font-medium">Casos ao mesmo tempo (máx.)</span>
+      <Input type="number" min={0} max={200} className="h-8 w-20" value={cur} onChange={(e) => setV(e.target.value)} data-testid="parallel-input" />
+      <Button
+        size="sm"
+        disabled={!ok}
+        data-testid="parallel-save"
+        onClick={async () => {
+          const r = await sendCommand({ type: "set_settings", maxParallel: n })
+          if (r?.ok) {
+            setV(null)
+            onSaved()
+          }
+        }}
+      >
+        Salvar
+      </Button>
+      <span className="text-muted-foreground text-xs">
+        {value ? `Hoje: ${value}.` : "Hoje: sem limite."} 0 = sem limite. Todo caso roda o Robot neste servidor, inclusive os dos celulares de outras máquinas —
+        limitar evita processador no máximo e esperas estourando. Vale na hora (os que estão rodando continuam).
+      </span>
+    </div>
+  )
+}
+
 /** Cadastro das máquinas worker (IP, SSH, agente, ativar/desativar) — o mestre é este servidor. */
 export function MachineAdmin() {
   const { data, reload } = usePoll<MachinesDto>("/api/machines", 3000)
@@ -262,6 +295,7 @@ export function MachineAdmin() {
         </Button>
       </CardHeader>
       <CardContent className="grid gap-4 px-5">
+        {data && <ParallelLimit value={data.settings?.maxParallel ?? 0} onSaved={() => void reload()} />}
         <div className="rounded-md border">
           <Table>
             <TableHeader>

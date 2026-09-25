@@ -707,6 +707,62 @@ describe("runner (modo fake)", () => {
     ])
   })
 
+  it("fila com esperas ×2 passa ao robot as esperas do projeto multiplicadas", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    const ids = await h.catalogIds((n) => n === "CT_LOGIN_01-Caso-PASS")
+
+    // Act
+    const qid = (await h.command({ type: "create_queue", input: { ...queueInput(ids), waitFactor: 2 } })).data!.queueId as string
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+
+    // Assert
+    const a = liveQueue(qid)!.items[0].attempts[0]
+    const consoleText = await fs.readFile(path.join(h.p.runs, a.dir, "console.log"), "utf8")
+    expect(consoleText).toContain("variáveis: TIMEOUT_S:4s TIMEOUT:10s TIMEOUT_M:18s TIMEOUT_L:40s")
+  })
+
+  it("aumentar as tentativas extras com a fila terminada roda de novo só os casos que falharam", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 1 })
+    const ids = await h.catalogIds((n) => ["CT_LOGIN_01-Caso-PASS", "CT_LOGIN_03-Caso-FAIL"].includes(n))
+    const qid = (await h.command({ type: "create_queue", input: { ...queueInput(ids), retries: 0 } })).data!.queueId as string
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+
+    // Act
+    const res = await h.command({ type: "set_queue_retries", queueId: qid, retries: 2 })
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined)
+
+    // Assert
+    const q = liveQueue(qid)!
+    expect([res.message, q.options.retries, q.items.map((i) => [i.name.slice(0, 11), i.attempts.length, i.status])]).toEqual([
+      "Tentativas extras: 2 · 1 caso(s) com falha voltaram para a fila",
+      2,
+      [
+        ["CT_LOGIN_01", 1, "passed"],
+        ["CT_LOGIN_03", 3, "failed"],
+      ],
+    ])
+  })
+
+  it("limite de casos ao mesmo tempo: com máximo 1, três celulares livres rodam um caso por vez", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 3 })
+    await h.tickUntil(async () => (await h.readyCount()) >= 3 || undefined)
+    const set = await h.command({ type: "set_settings", maxParallel: 1 })
+    const ids = await h.catalogIds((n) => n.includes("PASS") && !n.includes("SLOW")).then((x) => x.slice(0, 3))
+
+    // Act
+    const created = await h.command({ type: "create_queue", input: { ...queueInput(ids), allowSameAccount: true } })
+    const q = await h.tickUntil(() => {
+      const live = liveQueue(created.data!.queueId as string)
+      return finished(live) ? live : undefined
+    }, 30_000)
+
+    // Assert
+    expect([set.ok, peakConcurrency([q]), q.items.every((i) => i.status === "passed")]).toEqual([true, 1, true])
+  })
+
   it("a massa usada no caso fica registrada na tentativa (conta e dados gerados)", async () => {
     // Arrange
     h = await makeHarness({ emulators: 1 })

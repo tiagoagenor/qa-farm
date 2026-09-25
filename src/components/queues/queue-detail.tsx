@@ -22,7 +22,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Fragment, useMemo, useState } from "react"
 
-import type { Item, ItemStatus } from "@/core/types"
+import type { Item, ItemStatus, Queue } from "@/core/types"
 import { EmptyState, PageHeader } from "@/components/panel/page-header"
 import { StatusBadge } from "@/components/panel/status-badge"
 import {
@@ -48,6 +48,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Card, CardContent } from "@/components/ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -60,9 +61,12 @@ import {
   durationBetween,
   formatDateTime,
   formatDuration,
+  formatFactor,
   ITEM_STATUS,
   QUEUE_STATUS,
+  RETRY_OPTIONS,
   runFileUrl,
+  WAIT_FACTORS,
 } from "@/lib/format"
 import { massaLabel } from "@/core/massa"
 import { queueElapsedSec, RETRYABLE_ITEM_STATUSES } from "@/core/queue-logic"
@@ -320,6 +324,51 @@ function ItemRow({
   )
 }
 
+/** Opções que podem mudar a qualquer momento, inclusive com a fila rodando. */
+function QueueOptionsBar({ q, busy, run }: { q: Queue; busy: boolean; run: (cmd: Parameters<typeof sendCommand>[0]) => Promise<void> }) {
+  return (
+    <div className="bg-muted/30 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border px-4 py-2 text-sm" data-testid="queue-options">
+      <label className="flex items-center gap-2">
+        <span className="text-muted-foreground">Tentativas extras</span>
+        <Select value={String(q.options.retries)} onValueChange={(v) => run({ type: "set_queue_retries", queueId: q.id, retries: Number(v) })} disabled={busy}>
+          <SelectTrigger className="h-8 w-20" data-testid="queue-retries">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {RETRY_OPTIONS.map((r) => (
+              <SelectItem key={r} value={String(r)}>
+                {r}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </label>
+      <label className="flex items-center gap-2">
+        <span className="text-muted-foreground">Esperas</span>
+        <Select
+          value={String(q.options.waitFactor ?? 1)}
+          onValueChange={(v) => run({ type: "set_queue_wait_factor", queueId: q.id, waitFactor: Number(v) })}
+          disabled={busy}
+        >
+          <SelectTrigger className="h-8 w-20" data-testid="queue-wait">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {WAIT_FACTORS.map((f) => (
+              <SelectItem key={f} value={String(f)}>
+                {formatFactor(f)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </label>
+      <span className="text-muted-foreground text-xs">
+        Aumentar as tentativas recoloca na fila os casos que falharam (até o novo limite). Vale na hora, mesmo com a fila rodando.
+      </span>
+    </div>
+  )
+}
+
 export function QueueDetail({ id }: { id: string }) {
   const router = useRouter()
   const { data, error, loading, reload } = usePoll<QueueDetailDto>(`/api/queues/${id}`, 2000)
@@ -400,7 +449,7 @@ export function QueueDetail({ id }: { id: string }) {
             {q.name} <StatusBadge {...QUEUE_STATUS[q.status]} />
           </span>
         }
-        description={`Criada ${formatDateTime(q.createdAt)} · ambiente ${q.env} · timeout ${formatDuration(q.options.timeoutSec)} · ${q.options.retries} tentativa(s) extra(s) · ${q.options.closeAppAfter === false ? "app fica aberto ao fim do caso" : "fecha o app ao fim de cada caso"} · ${q.options.allowSameAccount ? "mesma conta em vários celulares" : "uma conta por vez"}`}
+        description={`Criada ${formatDateTime(q.createdAt)} · ambiente ${q.env} · timeout ${formatDuration(q.options.timeoutSec)} · ${q.options.retries} tentativa(s) extra(s) · esperas ${formatFactor(q.options.waitFactor)} · ${q.options.closeAppAfter === false ? "app fica aberto ao fim do caso" : "fecha o app ao fim de cada caso"} · ${q.options.allowSameAccount ? "mesma conta em vários celulares" : "uma conta por vez"}`}
         actions={
           <>
             {q.status === "running" && (
@@ -468,6 +517,8 @@ export function QueueDetail({ id }: { id: string }) {
           </>
         }
       />
+
+      <QueueOptionsBar q={q} busy={busy} run={run} />
 
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-6">
         <Stat label="Passou" value={s.counts.passed} tone="text-emerald-600" />

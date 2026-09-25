@@ -61,7 +61,7 @@ export function buildQueue(
       attempts: [],
     })
   }
-  const options: QueueOptions = { timeoutSec: input.timeoutSec, retries: input.retries, closeAppAfter: input.closeAppAfter ?? true, allowSameAccount: input.allowSameAccount ?? false }
+  const options: QueueOptions = { timeoutSec: input.timeoutSec, retries: input.retries, closeAppAfter: input.closeAppAfter ?? true, allowSameAccount: input.allowSameAccount ?? false, waitFactor: input.waitFactor ?? 1 }
   return {
     queue: {
       id,
@@ -237,6 +237,36 @@ export function reopenItem(queue: Queue, itemIdValue: string): Queue | null {
     finishedAt: undefined,
     items: queue.items.map((i) => (i.id === itemIdValue ? { ...i, status: "queued", infraRequeues: 0, failRetries: 0 } : i)),
   }
+}
+
+/**
+ * Muda as tentativas extras de uma fila a qualquer momento (inclusive rodando ou já terminada):
+ * - aumentou: casos que terminaram em falha/tempo esgotado e ainda têm tentativa sobrando voltam para a fila
+ *   (fila terminada volta a rodar; fila pausada continua pausada; cancelada só guarda o valor)
+ * - diminuiu: casos na fila por uma nova tentativa acima do novo limite voltam ao resultado da última tentativa
+ */
+export function setQueueRetries(queue: Queue, retries: number): { queue: Queue; reopened: number; reverted: number } {
+  let reopened = 0
+  let reverted = 0
+  const canReopen = queue.status !== "canceled"
+  const items = queue.items.map((it) => {
+    const last = it.attempts[it.attempts.length - 1]
+    if (canReopen && (it.status === "failed" || it.status === "timeout") && it.failRetries < retries) {
+      reopened++
+      return { ...it, status: "queued" as const, failRetries: it.failRetries + 1 }
+    }
+    if (it.status === "queued" && it.failRetries > retries && last && (last.status === "failed" || last.status === "timeout")) {
+      reverted++
+      return { ...it, status: last.status, failRetries: it.failRetries - 1 }
+    }
+    return it
+  })
+  const next: Queue = { ...queue, options: { ...queue.options, retries }, items }
+  if (reopened > 0 && queue.status === "done") {
+    next.status = "running"
+    next.finishedAt = undefined
+  }
+  return { queue: reverted > 0 ? finalizeIfDone(next, new Date()) : next, reopened, reverted }
 }
 
 /** Ids dos casos que devem entrar em "re-rodar falhas". */

@@ -54,6 +54,14 @@ export function formatDuration(sec: number | null | undefined, precise = false):
   return m % 60 ? `${h}h ${m % 60}min` : `${h}h`
 }
 
+/** "Esperas ×N": fatores oferecidos na tela (multiplicam as variáveis TIMEOUT* do projeto). */
+export const WAIT_FACTORS = [1, 1.5, 2, 3] as const
+export const RETRY_OPTIONS = Array.from({ length: 11 }, (_, i) => i)
+
+export function formatFactor(f: number | undefined): string {
+  return `×${String(f ?? 1).replace(".", ",")}`
+}
+
 export function durationBetween(start?: string, end?: string, now: number = Date.now()): number | null {
   if (!start) return null
   const a = Date.parse(start)

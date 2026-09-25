@@ -22,6 +22,7 @@ import {
   type Queue,
   QueueSchema,
   RunnerStateSchema,
+  SettingsSchema,
 } from "@/core/types"
 
 import { ctx } from "./context"
@@ -54,8 +55,10 @@ export async function readMachines() {
     fsp.readFile(path.join(p.state, "ssh", "qafarm_ed25519.pub"), "utf8").catch(() => ""),
   ])
   const byId = new Map((status?.machines ?? []).map((s) => [s.id, s]))
+  const settings = await readJson(p.settings, SettingsSchema, { maxParallel: 0 })
   return {
     master: { id: cfg.machineId },
+    settings,
     publicKey: pub.trim() || null,
     machines: file.machines.map(({ token: _token, ...m }) => ({ ...m, status: byId.get(m.id) ?? null })),
   }

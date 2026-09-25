@@ -33,6 +33,8 @@ export interface Config {
   caseMemMb: number
   /** memória do MESTRE usada pelo processo robot de um caso em celular remoto */
   robotMemMb: number
+  /** arquivo de esperas do projeto Robot (relativo à raiz do projeto), multiplicado pelo "Esperas ×N" da fila */
+  robotTimeoutFile: string
   /** worker sem resposta há mais que isso = offline: casos dele viram erro de infra e voltam para a fila */
   remoteOfflineMs: number
   installConcurrency: number
@@ -79,6 +81,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     minFreeMemMb: num(env.QAFARM_MIN_FREE_MEM_MB, 1500),
     caseMemMb: num(env.QAFARM_CASE_MEM_MB, 150),
     robotMemMb: num(env.QAFARM_ROBOT_MEM_MB, 120),
+    robotTimeoutFile: env.QAFARM_ROBOT_TIMEOUT_FILE ?? "testsData/timeoutVariables.py",
     remoteOfflineMs: num(env.QAFARM_REMOTE_OFFLINE_MS, 15_000),
     // troca de versão do APK: instala em até 5 celulares ao mesmo tempo (cada emulador usa os próprios núcleos)
     installConcurrency: num(env.QAFARM_INSTALL_CONCURRENCY, 5),

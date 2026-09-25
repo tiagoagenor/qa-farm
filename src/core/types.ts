@@ -112,11 +112,13 @@ export type QueueStatus = z.infer<typeof QueueStatusSchema>
 
 export const QueueOptionsSchema = z.object({
   timeoutSec: z.number().int().min(10).max(24 * 3600),
-  retries: z.number().int().min(0).max(5),
+  retries: z.number().int().min(0).max(10),
   /** fecha o app (force-stop) ao fim de cada caso — o app deixado aberto segue tocando vídeo e gastando CPU */
   closeAppAfter: z.boolean().optional(), // ausente = true
   /** casos com a mesma conta rodam em vários celulares ao mesmo tempo (cada caso faz o próprio login); ausente = trava por conta */
   allowSameAccount: z.boolean().optional(),
+  /** multiplica as esperas do projeto (TIMEOUT_*) — emulador é mais lento que aparelho físico; ausente = 1 */
+  waitFactor: z.number().min(1).max(5).optional(),
 })
 export type QueueOptions = z.infer<typeof QueueOptionsSchema>
 
@@ -198,6 +200,13 @@ export const DesiredSchema = z.object({
 export const PhysicalStateSchema = z.object({ enabled: z.record(z.string(), z.number().int()) })
 export type PhysicalState = z.infer<typeof PhysicalStateSchema>
 
+/** Ajustes do painel (gravados pelo runner em state/settings.json). */
+export const SettingsSchema = z.object({
+  /** máximo de casos rodando ao mesmo tempo no pool todo (o robot de todo caso roda no mestre); 0 = sem limite */
+  maxParallel: z.number().int().min(0).max(200).default(0),
+})
+export type Settings = z.infer<typeof SettingsSchema>
+
 /** Emuladores tirados do conjunto de testes pela chave "Usar nos testes" (ligados, mas sem receber casos). */
 export const EmulatorsDisabledSchema = z.object({ disabled: z.array(z.string()) })
 export type Desired = z.infer<typeof DesiredSchema>
@@ -208,9 +217,10 @@ export const CreateQueueInputSchema = z.object({
   appId: z.string().min(1),
   env: EnvSchema,
   timeoutSec: z.number().int().min(10).max(24 * 3600),
-  retries: z.number().int().min(0).max(5),
+  retries: z.number().int().min(0).max(10),
   closeAppAfter: z.boolean().optional(), // ausente = true
   allowSameAccount: z.boolean().optional(), // ausente = false (trava por conta)
+  waitFactor: z.number().min(1).max(5).optional(), // ausente = 1
   testIds: z.array(z.string()).min(1).max(5000),
 })
 export type CreateQueueInput = z.infer<typeof CreateQueueInputSchema>
@@ -222,6 +232,9 @@ export const CommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("cancel_queue"), queueId: z.string() }),
   z.object({ type: z.literal("rerun_failed"), queueId: z.string() }),
   z.object({ type: z.literal("retry_item"), queueId: z.string(), itemId: z.string() }),
+  z.object({ type: z.literal("set_queue_retries"), queueId: z.string(), retries: z.number().int().min(0).max(10) }),
+  z.object({ type: z.literal("set_queue_wait_factor"), queueId: z.string(), waitFactor: z.number().min(1).max(5) }),
+  z.object({ type: z.literal("set_settings"), maxParallel: z.number().int().min(0).max(200) }),
   z.object({ type: z.literal("delete_queue"), queueId: z.string() }),
   z.object({ type: z.literal("clear_queues") }),
   z.object({ type: z.literal("start_devices"), count: z.number().int().min(1).max(18), machineId: z.string().optional() }),

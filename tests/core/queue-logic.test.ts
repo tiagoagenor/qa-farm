@@ -9,6 +9,7 @@ import {
   nextItemStatus,
   queueElapsedSec,
   reopenItem,
+  setQueueRetries,
   summarize,
 } from "@/core/queue-logic"
 import { attempt, entry, item, queue } from "../helpers/builders"
@@ -312,5 +313,60 @@ describe("reopenItem", () => {
 
     // Assert
     expect(out).toBeNull()
+  })
+})
+
+describe("setQueueRetries", () => {
+  const failed = (id: string, failRetries: number, status: "failed" | "timeout" = "failed") =>
+    item(id, [], { status, failRetries, attempts: [attempt({ n: failRetries + 1, status, endedAt: "2026-09-24T10:05:00.000Z" })] })
+
+  it("aumentar recoloca na fila os casos com falha que ainda têm tentativa sobrando e reabre a fila terminada", () => {
+    // Arrange
+    const q = queue([failed("A", 0), failed("B", 1, "timeout"), item("C", [], { status: "passed" })], { status: "done", finishedAt: "2026-09-24T11:00:00.000Z" })
+
+    // Act
+    const r = setQueueRetries(q, 1)
+
+    // Assert
+    expect([r.reopened, r.queue.status, r.queue.finishedAt, r.queue.items.map((i) => i.status), r.queue.options.retries]).toEqual([
+      1,
+      "running",
+      undefined,
+      ["queued", "timeout", "passed"],
+      1,
+    ])
+  })
+
+  it("diminuir devolve ao resultado anterior quem estava na fila por uma tentativa acima do novo limite", () => {
+    // Arrange
+    const retrying = item("A", [], {
+      status: "queued",
+      failRetries: 2,
+      attempts: [attempt({ n: 1, status: "failed" }), attempt({ n: 2, status: "failed" })],
+    })
+    const q = queue([retrying, item("B")], { options: { timeoutSec: 60, retries: 3 } })
+
+    // Act
+    const r = setQueueRetries(q, 1)
+
+    // Assert
+    expect([r.reverted, r.queue.items.map((i) => [i.status, i.failRetries])]).toEqual([
+      1,
+      [
+        ["failed", 1],
+        ["queued", 0],
+      ],
+    ])
+  })
+
+  it("fila cancelada só guarda o novo valor", () => {
+    // Arrange
+    const q = queue([failed("A", 0)], { status: "canceled" })
+
+    // Act
+    const r = setQueueRetries(q, 3)
+
+    // Assert
+    expect([r.reopened, r.queue.status, r.queue.items[0].status, r.queue.options.retries]).toEqual([0, "canceled", "failed", 3])
   })
 })

@@ -21,6 +21,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 console.log("=".repeat(78))
 console.log(`Fake :: ${name}`)
+// variáveis recebidas por -v (ex.: esperas multiplicadas pela fila)
+const vars = args.flatMap((a, i) => (a === "-v" ? [args[i + 1]] : [])).filter((v) => /TIMEOUT/.test(v))
+if (vars.length) console.log(`variáveis: ${vars.join(" ")}`)
 console.log("=".repeat(78))
 
 if (!serial) {

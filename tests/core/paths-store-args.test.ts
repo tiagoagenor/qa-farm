@@ -6,7 +6,7 @@ import { z } from "zod"
 
 import { isSafeId, newId } from "@/core/ids"
 import { contentTypeFor, safeJoin } from "@/core/paths"
-import { buildRobotArgs, buildRobotEnv, escapeRobotPattern } from "@/core/robot-args"
+import { buildRobotArgs, buildRobotEnv, escapeRobotPattern, parseTimeoutVariables, scaledTimeoutArgs } from "@/core/robot-args"
 import { listJsonFiles, readJson, writeJsonAtomic } from "@/core/store"
 
 let dir: string
@@ -200,5 +200,29 @@ describe("robot args", () => {
 
     // Assert
     expect(env).toEqual({ PATH: "/bin", HOME: "/h", AMBIENTE: "hml", QAFARM_SERIAL: "emulator-5554" })
+  })
+})
+
+describe("esperas do projeto (Esperas ×N)", () => {
+  it("lê as variáveis de espera do arquivo do projeto", () => {
+    // Arrange
+    const text = "import os\nTIMEOUT_S = '2s'\nTIMEOUT = \"5\"  # padrão\nTIMEOUT_L = '20 s'\nMEIO_TEMPO_MS = '500ms'\nNOME = 'x'\n"
+
+    // Act
+    const vars = parseTimeoutVariables(text)
+
+    // Assert
+    expect(vars).toEqual({ TIMEOUT_S: 2, TIMEOUT: 5, TIMEOUT_L: 20, MEIO_TEMPO_MS: 0.5 })
+  })
+
+  it("multiplica e arredonda para cima; fator 1 não passa nada", () => {
+    // Arrange
+    const vars = { TIMEOUT_S: 2, TIMEOUT_M: 9, MEIO: 0.5 }
+
+    // Act
+    const out = [scaledTimeoutArgs(vars, 1.5), scaledTimeoutArgs(vars, 1)]
+
+    // Assert
+    expect(out).toEqual([["-v", "TIMEOUT_S:3s", "-v", "TIMEOUT_M:14s", "-v", "MEIO:1s"], []])
   })
 })

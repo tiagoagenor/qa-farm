@@ -37,7 +37,7 @@ DATA_SIZE="${DATA_SIZE:-4G}"        # armazenamento interno
 LCD_WIDTH="${LCD_WIDTH:-720}"       # tela 720x1600 @ 320 dpi (20:9): botão de login aparece (validado com CT_LOGIN_01)
 LCD_HEIGHT="${LCD_HEIGHT:-1600}"    #   e é leve para 12 emuladores (1080x2400 usava ~5 GB por emulador; 720x1280 esconde o botão)
 LCD_DENSITY="${LCD_DENSITY:-320}"
-EMU_CPU_QUOTA="${EMU_CPU_QUOTA:-250%}"  # limite de CPU por emulador (systemd --user scope; vazio = sem limite)
+EMU_CPU_QUOTA="${EMU_CPU_QUOTA:-300%}"  # limite de CPU por emulador (systemd --user scope; vazio = sem limite)
 EMU_MEM_MAX="${EMU_MEM_MAX:-5G}"        # limite de memória por emulador: estourou, só ele cai (vazio = sem limite)
 PREFIX="${PREFIX:-farm}"            # nome dos AVDs: farm-01, farm-02 ...
 BASE_PORT=5554                      # celular i usa console 5554+2(i-1), adb +1
