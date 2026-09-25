@@ -89,6 +89,8 @@ export const AttemptSchema = z.object({
   pgid: z.number().int().optional(),
   screenshots: z.array(z.string()).optional(),
   massa: z.array(MassaEntrySchema).optional(),
+  /** link da sessão no BrowserStack (vídeo e logs) */
+  cloudUrl: z.string().optional(),
 })
 export type Attempt = z.infer<typeof AttemptSchema>
 
@@ -151,7 +153,7 @@ export type DeviceState = z.infer<typeof DeviceStateSchema>
 
 export const DeviceSchema = z.object({
   serial: z.string(),
-  kind: z.enum(["emulator", "physical"]),
+  kind: z.enum(["emulator", "physical", "cloud"]),
   adbState: z.string(),
   index: z.number().int().optional(),
   name: z.string().optional(),
@@ -235,6 +237,10 @@ export const CommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("set_queue_retries"), queueId: z.string(), retries: z.number().int().min(0).max(10) }),
   z.object({ type: z.literal("set_queue_wait_factor"), queueId: z.string(), waitFactor: z.number().min(1).max(5) }),
   z.object({ type: z.literal("set_settings"), maxParallel: z.number().int().min(0).max(200) }),
+  z.object({ type: z.literal("bs_set_enabled"), enabled: z.boolean() }),
+  z.object({ type: z.literal("bs_add_slot"), device: z.string().min(1).max(80), osVersion: z.string().min(1).max(20) }),
+  z.object({ type: z.literal("bs_remove_slot"), id: z.number().int() }),
+  z.object({ type: z.literal("bs_set_slot_enabled"), id: z.number().int(), enabled: z.boolean() }),
   z.object({ type: z.literal("delete_queue"), queueId: z.string() }),
   z.object({ type: z.literal("clear_queues") }),
   z.object({ type: z.literal("start_devices"), count: z.number().int().min(1).max(18), machineId: z.string().optional() }),
@@ -303,6 +309,7 @@ export const RunResultSchema = z.object({
   screenshots: z.array(z.string()),
   hasOutputXml: z.boolean(),
   massa: z.array(MassaEntrySchema).optional(),
+  cloudUrl: z.string().optional(),
   finishedAt: z.string().optional(), // término real da tentativa (usado ao recuperar após reinício)
 })
 export type RunResult = z.infer<typeof RunResultSchema>

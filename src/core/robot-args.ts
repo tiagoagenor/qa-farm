@@ -76,6 +76,14 @@ export const ROBOT_ENV_WHITELIST = [
   "QAFARM_APPIUM_URL",
   "QAFARM_APP_PACKAGE",
   "QAFARM_APP_ACTIVITY",
+  // vaga do BrowserStack (o listener abre a sessão lá; a chave só vai para o processo do caso)
+  "QAFARM_BS_APP",
+  "QAFARM_BS_DEVICE",
+  "QAFARM_BS_OS",
+  "QAFARM_BS_USER",
+  "QAFARM_BS_KEY",
+  "QAFARM_BS_BUILD",
+  "QAFARM_BS_SESSION",
 ] as const
 
 /** Monta o ambiente do processo `robot` só com variáveis permitidas (nada de segredos do painel). */

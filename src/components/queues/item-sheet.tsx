@@ -142,6 +142,13 @@ export function ItemSheet({
                         </div>
                       )}
                       <div className="flex flex-wrap gap-2">
+                        {current.cloudUrl && (
+                          <Button variant="outline" size="sm" asChild>
+                            <a href={current.cloudUrl} target="_blank" rel="noreferrer" data-testid="cloud-link">
+                              Vídeo e logs no BrowserStack <ExternalLink />
+                            </a>
+                          </Button>
+                        )}
                         {["log.html", "report.html", "console.log", "output.xml"].map((f) => (
                           <Button key={f} variant="outline" size="sm" asChild>
                             <a href={runFileUrl(current.dir, f)} target="_blank" rel="noreferrer">

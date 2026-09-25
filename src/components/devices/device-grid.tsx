@@ -194,7 +194,11 @@ export function DeviceGrid() {
             {d.machineId ? d.serial.slice(d.machineId.length + 1) : d.serial}
           </CardTitle>
           <p className="text-muted-foreground mt-1 text-xs">
-            {d.kind === "emulator" ? `${d.name} · emulador` : `${d.model ?? "aparelho"} · físico`}
+            {d.kind === "emulator"
+              ? `${d.name} · emulador`
+              : d.kind === "cloud"
+                ? `${d.name} · BrowserStack`
+                : `${d.model ?? "aparelho"} · físico`}
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -219,7 +223,7 @@ export function DeviceGrid() {
         </div>
       </CardHeader>
       <CardContent className="grid gap-2 px-4 text-xs">
-        {(d.kind === "physical" || d.kind === "emulator") && (
+        {(d.kind === "physical" || d.kind === "emulator" || d.kind === "cloud") && (
           <div className="bg-muted/40 flex items-center justify-between gap-3 rounded-md border px-3 py-2">
             <div className="grid gap-0.5">
               <Label htmlFor={`use-${d.serial}`} className="text-xs font-medium">
@@ -237,11 +241,19 @@ export function DeviceGrid() {
                 run(
                   d.kind === "physical"
                     ? { type: "set_physical", serial: d.serial, enabled: v }
-                    : { type: "set_emulator_enabled", serial: d.serial, enabled: v },
+                    : d.kind === "cloud"
+                      ? { type: "bs_set_slot_enabled", id: Number(d.serial.split(":")[1]), enabled: v }
+                      : { type: "set_emulator_enabled", serial: d.serial, enabled: v },
                 )
               }
               aria-label={`Usar ${d.serial} nos testes`}
-              data-testid={d.kind === "physical" ? "physical-switch" : "emulator-switch"}
+              data-testid={
+                d.kind === "physical"
+                  ? "physical-switch"
+                  : d.kind === "cloud"
+                    ? "cloud-switch"
+                    : "emulator-switch"
+              }
             />
           </div>
         )}
@@ -286,7 +298,17 @@ export function DeviceGrid() {
       machine: m,
       devices: devices.filter((d) => d.machineId === m.id),
     })),
-  ].filter((g) => g.master || workers.length > 0)
+    ...(devices.some((d) => d.kind === "cloud")
+      ? [
+          {
+            id: "browserstack",
+            name: "BrowserStack",
+            master: false,
+            devices: devices.filter((d) => d.kind === "cloud"),
+          },
+        ]
+      : []),
+  ].filter((g) => g.master || workers.length > 0 || devices.some((d) => d.kind === "cloud"))
   const metricsById = new Map((metricsData?.machines ?? []).map((m) => [m.id, m]))
 
   const n = Number(count)

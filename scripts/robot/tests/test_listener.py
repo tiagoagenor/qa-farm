@@ -193,3 +193,44 @@ def test_patch_e_aplicado_uma_unica_vez():
 
     # Assert
     assert applied_again is False
+
+
+BS_ENV = {
+    **ENV,
+    "QAFARM_BS_APP": "bs://abc123",
+    "QAFARM_BS_DEVICE": "Samsung Galaxy S22",
+    "QAFARM_BS_OS": "12.0",
+    "QAFARM_BS_USER": "usuario-bs",
+    "QAFARM_BS_KEY": "chave-secreta-bs",
+    "QAFARM_BS_BUILD": "QA Farm · fila",
+    "QAFARM_BS_SESSION": "CT_X",
+}
+
+
+def test_browserstack_monta_caps_da_vaga_com_credenciais_em_bstack_options():
+    # Arrange
+    env = dict(BS_ENV)
+
+    # Act
+    caps = qafarm_listener.build_bs_caps(PROJECT_CAPS, env)
+
+    # Assert
+    opts = caps["bstack:options"]
+    assert (caps["appium:app"], opts["deviceName"], opts["platformVersion"], opts["userName"], "udid" in caps) == (
+        "bs://abc123",
+        "Samsung Galaxy S22",
+        "12.0",
+        "usuario-bs",
+        False,
+    )
+
+
+def test_browserstack_session_json_nao_grava_a_chave():
+    # Arrange
+    caps = qafarm_listener.build_bs_caps(PROJECT_CAPS, dict(BS_ENV))
+
+    # Act
+    safe = qafarm_listener.redact(caps)
+
+    # Assert
+    assert ("chave-secreta-bs" in json.dumps(safe), caps["bstack:options"]["accessKey"]) == (False, "chave-secreta-bs")

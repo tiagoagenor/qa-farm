@@ -38,7 +38,7 @@ if (upper.includes("NOMATCH")) {
 fs.mkdirSync(outDir, { recursive: true })
 fs.writeFileSync(
   path.join(outDir, "session.json"),
-  JSON.stringify({ serial, url: process.env.QAFARM_APPIUM_URL, sessionId: `fake-${Date.now()}`, caps: { udid: serial } }, null, 2),
+  JSON.stringify({ serial, url: process.env.QAFARM_APPIUM_URL, sessionId: `fake-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, caps: { udid: serial } }, null, 2),
 )
 
 // massa usada (o listener real grava massa.json ao ler a conta do DATA_MASSA)

@@ -3,8 +3,11 @@ import "server-only"
 import fsp from "node:fs/promises"
 import path from "node:path"
 
+import { z } from "zod"
+
 import { newId } from "@/core/ids"
 import { parseMassa } from "@/core/massa"
+import { BsDeviceSchema, BsPlanSchema, BsStateSchema } from "@/core/browserstack"
 import { localPorts, MachinesFileSchema, MachinesStatusFileSchema, parseDeviceKey } from "@/core/machines"
 import { MetricsFileSchema } from "@/core/metrics"
 import { agentClient } from "@/server/remote/agent-client"
@@ -62,6 +65,30 @@ export async function readMachines() {
     publicKey: pub.trim() || null,
     machines: file.machines.map(({ token: _token, ...m }) => ({ ...m, status: byId.get(m.id) ?? null })),
   }
+}
+
+/** BrowserStack para a tela: vagas, liga/desliga, plano da conta e modelos disponíveis (sem credenciais). */
+export async function readBrowserStack() {
+  const { p } = ctx()
+  const [state, status, devices] = await Promise.all([
+    readJson(p.browserstack, BsStateSchema, { enabled: false, slots: [] }),
+    readJson(
+      p.browserstackStatus,
+      z
+        .object({
+          updatedAt: z.string(),
+          configured: z.boolean(),
+          user: z.string(),
+          plan: BsPlanSchema.nullable(),
+          error: z.string().optional(),
+          ourRunning: z.number(),
+        })
+        .nullable(),
+      null,
+    ),
+    readJson(path.join(p.state, "browserstack-devices.json"), z.object({ devices: BsDeviceSchema.array() }).nullable(), null),
+  ])
+  return { ...state, status, devices: devices?.devices ?? [] }
 }
 
 /** Cliente do agente para um celular de worker ("server02:emulator-5554"), ou null se for do mestre. */

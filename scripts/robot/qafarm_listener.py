@@ -90,6 +90,46 @@ def build_caps(project_caps: Mapping[str, Any], env: Mapping[str, str]) -> dict[
     return caps
 
 
+def is_browserstack(env: Mapping[str, str]) -> bool:
+    return bool(env.get("QAFARM_BS_APP", "").strip())
+
+
+def build_bs_caps(project_caps: Mapping[str, Any], env: Mapping[str, str]) -> dict[str, Any]:
+    """Capabilities W3C para uma vaga do BrowserStack: o app já enviado (bs://…), modelo/versão da vaga e
+    credenciais em bstack:options (nunca na URL — a URL aparece em logs)."""
+    automation = project_caps.get("automationName") or project_caps.get("appium:automationName") or "UiAutomator2"
+    return {
+        "platformName": "Android",
+        "appium:automationName": automation,
+        "appium:app": _required(env, "QAFARM_BS_APP"),
+        "appium:autoGrantPermissions": True,
+        "bstack:options": {
+            "userName": _required(env, "QAFARM_BS_USER"),
+            "accessKey": _required(env, "QAFARM_BS_KEY"),
+            "deviceName": _required(env, "QAFARM_BS_DEVICE"),
+            "platformVersion": _required(env, "QAFARM_BS_OS"),
+            "projectName": "QA Farm",
+            "buildName": env.get("QAFARM_BS_BUILD", "QA Farm"),
+            "sessionName": env.get("QAFARM_BS_SESSION", ""),
+            "idleTimeout": 300,
+            "video": True,
+            "deviceLogs": True,
+            # log do Appium no BrowserStack mostraria o que é digitado (senhas); comandos de texto mascarados
+            "appiumLogs": False,
+            "maskCommands": "setValues, getValues, setCookies, getCookies",
+        },
+    }
+
+
+def redact(caps: Mapping[str, Any]) -> dict[str, Any]:
+    """Cópia sem a chave de acesso (para gravar em arquivo)."""
+    out = json.loads(json.dumps(caps))
+    opts = out.get("bstack:options")
+    if isinstance(opts, dict) and "accessKey" in opts:
+        opts["accessKey"] = "***"
+    return out
+
+
 def appium_url(env: Mapping[str, str]) -> str:
     return _required(env, "QAFARM_APPIUM_URL")
 
@@ -108,10 +148,10 @@ def _write_session(url: str, caps: dict[str, Any], session_id: str | None) -> No
     if not out:
         return
     data = {
-        "serial": caps.get("udid"),
+        "serial": caps.get("udid") or (caps.get("bstack:options") or {}).get("deviceName"),
         "url": url,
         "sessionId": session_id,
-        "caps": caps,
+        "caps": redact(caps),
         "openedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     with open(os.path.join(out, "session.json"), "w", encoding="utf-8") as fh:
@@ -126,11 +166,16 @@ def install_patch() -> bool:
     if getattr(original, "_qafarm_patched", False):
         return False
 
+    # o Selenium registra em DEBUG o corpo do POST /session (capabilities com a chave do BrowserStack)
+    import logging
+
+    logging.getLogger("selenium.webdriver.remote.remote_connection").setLevel(logging.WARNING)
+
     @functools.wraps(original)
     def open_application(self, remote_url, alias=None, **kwargs):  # noqa: ARG001 (remote_url é substituída)
         env = os.environ
         url = appium_url(env)
-        caps = build_caps(kwargs, env)
+        caps = build_bs_caps(kwargs, env) if is_browserstack(env) else build_caps(kwargs, env)
         result = original(self, url, alias, **caps)
         session_id = None
         try:

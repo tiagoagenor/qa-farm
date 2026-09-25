@@ -115,6 +115,7 @@ export function applyResult(queue: Queue, itemIdValue: string, n: number, res: R
             teardownMessage: res.teardownMessage,
             screenshots: res.screenshots,
             massa: res.massa ?? a.massa,
+            cloudUrl: res.cloudUrl ?? a.cloudUrl,
             pgid: undefined,
           }
         : a,

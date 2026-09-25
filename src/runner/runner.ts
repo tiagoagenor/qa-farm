@@ -2,9 +2,12 @@ import fs from "node:fs"
 import fsp from "node:fs/promises"
 import path from "node:path"
 
+import { z } from "zod"
+
 import type { Config } from "@/core/config"
 import { newId } from "@/core/ids"
 import { deviceKey, dispatchBudget, globalIndex, interleaveByMachine, parseDeviceKey, splitIndex } from "@/core/machines"
+import { BS_APP_MAX_AGE_MS, BS_MACHINE_ID, BsAppsSchema, bsBudget, type BsPlan, type BsState, BsStateSchema, nextSlotId, slotIdFromKey, slotIndex, slotKey } from "@/core/browserstack"
 import { evaluateHealth, type HealthResult, type HealthState } from "@/core/health"
 import { type HostSample, MetricsFileSchema, MetricsHistory } from "@/core/metrics"
 import { parseMassa } from "@/core/massa"
@@ -57,6 +60,8 @@ interface RunningAttempt {
   serial: string
   index: number
   machineId?: string
+  /** vaga do BrowserStack (sem adb/Appium locais) */
+  cloud?: boolean
   pgid: number
   dir: string
   qemuPid?: number
@@ -119,6 +124,14 @@ export class Runner {
   private readonly appium: AppiumPool
   private lastStatusWrite = 0
   private settings: Settings = { maxParallel: 0 }
+  // BrowserStack: vagas, plano (sessões paralelas da conta) e APKs já enviados
+  private bs: BsState = { enabled: false, slots: [] }
+  private bsPlan: BsPlan | null = null
+  private bsPlanAt = 0
+  private bsError?: string
+  private bsApps: Record<string, { appUrl: string; uploadedAt: string }> = {}
+  private bsUploading = new Map<string, Promise<void>>()
+  private bsDevicesAt = 0
   private lastParallelLog = 0
 
   constructor(
@@ -207,6 +220,8 @@ export class Runner {
     this.physical = new Map(Object.entries((await readJson(this.p.physical, PhysicalStateSchema, { enabled: {} })).enabled))
     this.disabledEmulators = new Set((await readJson(this.p.emulatorsDisabled, EmulatorsDisabledSchema, { disabled: [] })).disabled)
     this.settings = await readJson(this.p.settings, SettingsSchema, { maxParallel: 0 })
+    this.bs = await readJson(this.p.browserstack, BsStateSchema, { enabled: false, slots: [] })
+    this.bsApps = (await readJson(this.p.browserstackApps, BsAppsSchema, { apps: {} })).apps
     const saved = await readJson(this.p.metrics, MetricsFileSchema.nullable(), null)
     this.metricsHistory = new MetricsHistory(saved?.machines.find((m) => m.id === this.cfg.machineId)?.history ?? [])
     this.catalog = await readJson(this.p.catalog, CatalogSchema.nullable(), null)
@@ -223,6 +238,7 @@ export class Runner {
     try {
       await this.processCommands()
       await this.remote.poll()
+      await this.pollBrowserStack()
       if (Date.now() - this.lastDeviceRefresh >= (this.opts.deviceRefreshMs ?? DEVICE_REFRESH_MS)) {
         await this.refreshDevices()
         this.lastDeviceRefresh = Date.now()
@@ -246,6 +262,128 @@ export class Runner {
     this.remote.shutdown()
     await this.writeRunnerState()
     await Promise.all([...this.writeChains.values()])
+  }
+
+  // ------------------------------------------------------------ BrowserStack ---
+  /** Plano (sessões paralelas) a cada 30 s e lista de aparelhos a cada 6 h; grava o status para a tela. */
+  private async pollBrowserStack(): Promise<void> {
+    const bs = this.ad.browserstack
+    const now = Date.now()
+    if (bs.configured && (this.bs.enabled || this.bsPlanAt === 0) && now - this.bsPlanAt >= 30_000) {
+      this.bsPlanAt = now
+      try {
+        this.bsPlan = await bs.plan()
+        this.bsError = undefined
+      } catch (e) {
+        this.bsPlan = null
+        this.bsError = (e as Error).message
+      }
+      if (now - this.bsDevicesAt > 6 * 3600_000) {
+        try {
+          const list = (await bs.devices()).filter((d) => d.os === "android")
+          await writeJsonAtomic(path.join(this.p.state, "browserstack-devices.json"), { updatedAt: new Date().toISOString(), devices: list })
+          this.bsDevicesAt = now
+        } catch {
+          /* tenta de novo no próximo ciclo */
+        }
+      }
+      await writeJsonAtomic(this.p.browserstackStatus, {
+        updatedAt: new Date().toISOString(),
+        configured: bs.configured,
+        user: bs.user,
+        plan: this.bsPlan,
+        error: this.bsError,
+        ourRunning: [...this.running.values()].filter((r) => r.cloud).length,
+      })
+    }
+  }
+
+  /** Vagas como "celulares" do tipo cloud. */
+  private bsDevices(meta: AppMeta | null, busyBySerial: Map<string, RunningAttempt>, now: string): Device[] {
+    const bs = this.ad.browserstack
+    const md5 = meta?.md5 ?? ""
+    const app = md5 ? this.bsApps[md5] : undefined
+    const fresh = !!app && Date.now() - Date.parse(app.uploadedAt) < BS_APP_MAX_AGE_MS
+    if (this.bs.enabled && bs.configured && meta && !fresh) this.bsUpload(meta)
+    return this.bs.slots.map((slot) => {
+      const serial = slotKey(slot.id)
+      const base: Device = {
+        serial,
+        kind: "cloud",
+        adbState: "cloud",
+        index: slotIndex(slot.id),
+        name: `${slot.device} · Android ${slot.osVersion}`,
+        model: slot.device,
+        machineId: BS_MACHINE_ID,
+        enabled: slot.enabled && this.bs.enabled,
+        state: "offline",
+        updatedAt: now,
+      }
+      const ra = busyBySerial.get(serial)
+      if (ra) {
+        const it = this.queues.get(ra.queueId)?.items.find((i) => i.id === ra.itemId)
+        return { ...base, state: "busy", currentQueueId: ra.queueId, currentItemId: ra.itemId, currentTestName: it?.name, appVersionCode: meta?.versionCode }
+      }
+      if (!bs.configured) return { ...base, note: "Credenciais do BrowserStack não configuradas no .env do painel" }
+      if (!this.bs.enabled) return { ...base, note: "BrowserStack desligado" }
+      if (this.bsError) return { ...base, note: `BrowserStack: ${this.bsError}` }
+      if (meta && !fresh) return { ...base, state: "installing", note: `Enviando ${meta.versionName} (${meta.versionCode}) ao BrowserStack` }
+      return { ...base, state: "ready", appVersionCode: meta?.versionCode }
+    })
+  }
+
+  /** Envia o APK ao BrowserStack uma vez por md5 (em segundo plano). */
+  private bsUpload(meta: AppMeta): void {
+    if (this.bsUploading.has(meta.md5)) return
+    this.log(`enviando ${meta.versionName} (${meta.versionCode}) ao BrowserStack`)
+    const job = this.ad.browserstack
+      .upload(this.p.appApk(meta.id), `qafarm-${meta.md5}`)
+      .then(async (appUrl) => {
+        this.bsApps = { ...this.bsApps, [meta.md5]: { appUrl, uploadedAt: new Date().toISOString() } }
+        await writeJsonAtomic(this.p.browserstackApps, { apps: this.bsApps })
+        this.log(`APK ${meta.versionCode} no BrowserStack: ${appUrl}`)
+        this.lastDeviceRefresh = 0
+      })
+      .catch((e: Error) => {
+        this.bsError = `falha ao enviar o APK: ${e.message}`
+        this.log(this.bsError)
+      })
+      .finally(() => setTimeout(() => this.bsUploading.delete(meta.md5), 60_000))
+    this.bsUploading.set(meta.md5, job)
+  }
+
+  /** Variáveis do caso numa vaga do BrowserStack (o listener abre a sessão lá). */
+  private bsEnv(serial: string, queueName: string, testName: string, meta: AppMeta): Record<string, string> {
+    const id = slotIdFromKey(serial)
+    if (id === null) return {}
+    const slot = this.bs.slots.find((x) => x.id === id)
+    const app = this.bsApps[meta.md5]
+    if (!slot || !app) return {}
+    return {
+      QAFARM_BS_APP: app.appUrl,
+      QAFARM_BS_DEVICE: slot.device,
+      QAFARM_BS_OS: slot.osVersion,
+      QAFARM_BS_USER: this.cfg.bsUser,
+      QAFARM_BS_KEY: this.cfg.bsKey,
+      QAFARM_BS_BUILD: `QA Farm · ${queueName}`.slice(0, 250),
+      QAFARM_BS_SESSION: testName.slice(0, 250),
+    }
+  }
+
+  /** Fim do caso no BrowserStack: marca passou/falhou, encerra sessão órfã e devolve o link do vídeo/logs. */
+  private async finishBsSession(ra: RunningAttempt, status: string, message?: string): Promise<string | undefined> {
+    const s = await readJson(path.join(ra.dir, "session.json"), z.object({ sessionId: z.string().nullable().optional() }).nullable(), null)
+    const id = s?.sessionId
+    if (!id) return undefined
+    const bs = this.ad.browserstack
+    try {
+      if (ra.timedOut || ra.canceled || ra.deviceLost) await bs.deleteSession(id)
+      await bs.setSessionStatus(id, status === "passed" ? "passed" : "failed", status === "passed" ? "" : (message ?? status).split("\n")[0])
+      return (await bs.session(id)).publicUrl
+    } catch (e) {
+      this.log(`BrowserStack: não consegui fechar a sessão ${id}: ${(e as Error).message}`)
+      return undefined
+    }
   }
 
   // ------------------------------------------------------- saúde da máquina ---
@@ -520,6 +658,36 @@ export class Runner {
         if (preview.reverted) parts.push(`${preview.reverted} nova(s) tentativa(s) cancelada(s)`)
         return { ok: true, message: parts.join(" · "), data: { reopened: preview.reopened, reverted: preview.reverted } }
       }
+      case "bs_set_enabled": {
+        if (c.enabled && !this.ad.browserstack.configured) return { ok: false, message: "Configure QAFARM_BS_USER e QAFARM_BS_KEY no .env do painel" }
+        this.bs = { ...this.bs, enabled: c.enabled }
+        await writeJsonAtomic(this.p.browserstack, this.bs)
+        this.bsPlanAt = 0
+        this.lastDeviceRefresh = 0
+        return { ok: true, message: c.enabled ? "BrowserStack ligado: as vagas ativadas recebem casos" : "BrowserStack desligado: os casos em andamento terminam; nenhum novo vai para lá" }
+      }
+      case "bs_add_slot": {
+        if (this.bs.slots.length >= 20) return { ok: false, message: "Limite de 20 vagas" }
+        const slot = { id: nextSlotId(this.bs.slots), device: c.device, osVersion: c.osVersion, enabled: true }
+        this.bs = { ...this.bs, slots: [...this.bs.slots, slot] }
+        await writeJsonAtomic(this.p.browserstack, this.bs)
+        this.lastDeviceRefresh = 0
+        return { ok: true, message: `Vaga ${slot.id}: ${c.device} · Android ${c.osVersion}` }
+      }
+      case "bs_remove_slot": {
+        if ([...this.running.values()].some((r) => r.serial === slotKey(c.id))) return { ok: false, message: "Vaga ocupada com um caso; aguarde terminar" }
+        this.bs = { ...this.bs, slots: this.bs.slots.filter((x) => x.id !== c.id) }
+        await writeJsonAtomic(this.p.browserstack, this.bs)
+        this.lastDeviceRefresh = 0
+        return { ok: true, message: `Vaga ${c.id} removida` }
+      }
+      case "bs_set_slot_enabled": {
+        if (!this.bs.slots.some((x) => x.id === c.id)) return { ok: false, message: "Vaga não encontrada" }
+        this.bs = { ...this.bs, slots: this.bs.slots.map((x) => (x.id === c.id ? { ...x, enabled: c.enabled } : x)) }
+        await writeJsonAtomic(this.p.browserstack, this.bs)
+        this.lastDeviceRefresh = 0
+        return { ok: true, message: `Vaga ${c.id} ${c.enabled ? "ativada" : "desativada (termina o caso atual)"}` }
+      }
       case "set_settings": {
         this.settings = { ...this.settings, maxParallel: c.maxParallel }
         await writeJsonAtomic(this.p.settings, this.settings)
@@ -773,7 +941,7 @@ export class Runner {
 
     // celular sumiu ou qemu trocou durante um caso → infra
     for (const ra of this.running.values()) {
-      if (ra.deviceLost) continue
+      if (ra.deviceLost || ra.cloud) continue
       const d = parsed.find((x) => x.serial === ra.serial)
       const pid = qemu.get(ra.index)
       if (!d || d.adbState !== "device" || (ra.qemuPid && pid !== ra.qemuPid)) {
@@ -882,7 +1050,7 @@ export class Runner {
     const stopping = this.farmOps.some((o) => o.kind === "stopAll") || this.farmJob?.command === "desligar todos"
     for (const prev of this.devices.values()) {
       const idx = prev.index
-      if (prev.kind !== "emulator" || !idx || next.has(prev.serial) || this.maintenance.has(idx)) continue
+      if (prev.kind !== "emulator" || prev.machineId === BS_MACHINE_ID || !idx || next.has(prev.serial) || this.maintenance.has(idx)) continue
       if (prev.machineId) {
         // worker: só reinicia se a máquina está respondendo (sem resposta = problema de rede, não do emulador)
         if (!this.remote.isReachable(prev.machineId) || splitIndex(idx).local > this.remote.desiredOf(prev.machineId)) continue
@@ -893,6 +1061,9 @@ export class Runner {
       if (stopping || idx > this.desired || prev.state === "maintenance") continue
       this.restartDevice(idx, "sumiu do adb")
     }
+
+    // vagas do BrowserStack (sem adb: prontas quando o APK da fila ativa já está no BrowserStack)
+    for (const d of this.bsDevices(meta, busyBySerial, now)) next.set(d.serial, d)
 
     // aparelho físico ativado mas desconectado continua visível (e ativado)
     for (const [serial, idx] of this.physical) {
@@ -1044,6 +1215,17 @@ export class Runner {
         ),
       )
     }
+    budget.set(
+      BS_MACHINE_ID,
+      this.bs.enabled && this.ad.browserstack.configured
+        ? bsBudget({
+            freeSlots: free.filter((f) => f.machineId === BS_MACHINE_ID).length,
+            ourRunning: [...this.running.values()].filter((r) => r.cloud).length,
+            plan: this.bsPlan,
+            reserve: this.cfg.bsReserve,
+          })
+        : 0,
+    )
     const usable = interleaveByMachine(free.filter((f) => (budget.get(f.machineId ?? "") ?? Infinity) > 0))
     if (usable.length === 0) return
     // memória do MESTRE: o robot de todo caso (inclusive de celular remoto) roda aqui
@@ -1084,7 +1266,7 @@ export class Runner {
    */
   private async afterCase(ra: RunningAttempt): Promise<void> {
     const q = this.queues.get(ra.queueId)
-    if (ra.deviceLost) return
+    if (ra.deviceLost || ra.cloud) return
     try {
       if (q?.options.closeAppAfter !== false) {
         const meta = await this.appMeta(q?.appId)
@@ -1099,6 +1281,7 @@ export class Runner {
 
   /** Antes de cada caso: fecha diálogo de erro na tela; se não fechar, o celular vai para manutenção. */
   private async preflight(serial: string, index: number): Promise<boolean> {
+    if (slotIdFromKey(serial) !== null) return true // BrowserStack: aparelho novo a cada sessão
     await this.adb.keyevent(serial, "WAKEUP").catch(() => undefined) // a tela fica apagada entre os casos
     let focus: string
     try {
@@ -1159,9 +1342,10 @@ export class Runner {
       // celular de worker: serial e índice LOCAIS da máquina (o Appium roda lá) e a URL pelo túnel
       QAFARM_SERIAL: machineId ? parseDeviceKey(a.serial, this.remote.ids()).serial : a.serial,
       QAFARM_INDEX: String(splitIndex(index).local),
-      QAFARM_APPIUM_URL: this.appium.url(index),
+      QAFARM_APPIUM_URL: machineId === BS_MACHINE_ID ? this.ad.browserstack.hubUrl : this.appium.url(index),
       QAFARM_APP_PACKAGE: meta.package,
       QAFARM_APP_ACTIVITY: meta.launchableActivity,
+      ...this.bsEnv(a.serial, q.name, it.name, meta),
     })
     // "Esperas ×N" da fila: multiplica as variáveis de espera do projeto sem alterar o projeto
     const factor = q.options.waitFactor ?? 1
@@ -1179,6 +1363,7 @@ export class Runner {
     const startedAt = new Date().toISOString()
     const relDir = path.relative(this.p.runs, dir)
     const qemuPid = machineId ? this.devices.get(a.serial)?.qemuPid : (await this.ad.farm.qemuPids()).get(index)
+    const cloud = machineId === BS_MACHINE_ID
     const ra: RunningAttempt = {
       queueId: q.id,
       itemId: it.id,
@@ -1186,6 +1371,7 @@ export class Runner {
       serial: a.serial,
       index,
       machineId,
+      cloud,
       pgid: spawned.pid,
       dir,
       qemuPid,
@@ -1240,14 +1426,20 @@ export class Runner {
     const massa = parseMassa(await read("massa.json"))
     if (massa.length) result.massa = massa
     const finishedAt = new Date()
-    await writeJsonAtomic(path.join(ra.dir, "result.json"), { ...result, finishedAt: finishedAt.toISOString() })
     // sessão órfã (timeout/cancelamento/robot morto) ocuparia as portas do celular no Appium compartilhado
     // worker fora do ar não pode travar o fim do caso (o resultado precisa ser gravado de qualquer jeito)
-    const removed = await this.appium.cleanupSessions(ra.index, ra.serial).catch((e: Error) => {
-      this.log(`não consegui limpar as sessões do Appium de ${ra.serial}: ${e.message}`)
-      return 0
-    })
+    if (ra.cloud) {
+      const url = await this.finishBsSession(ra, result.status, result.message)
+      if (url) result.cloudUrl = url
+    }
+    const removed = ra.cloud
+      ? 0
+      : await this.appium.cleanupSessions(ra.index, ra.serial).catch((e: Error) => {
+          this.log(`não consegui limpar as sessões do Appium de ${ra.serial}: ${e.message}`)
+          return 0
+        })
     if (removed) this.log(`${removed} sessão(ões) do Appium encerrada(s) para ${ra.serial}`)
+    await writeJsonAtomic(path.join(ra.dir, "result.json"), { ...result, finishedAt: finishedAt.toISOString() })
     this.running.delete(`${ra.queueId}/${ra.itemId}`)
     this.updateQueue(ra.queueId, (cur) => applyResult(cur, ra.itemId, ra.n, result, finishedAt))
     this.log(`■ ${ra.queueId}/${ra.itemId} em ${ra.serial}: ${result.status}${result.message ? ` — ${result.message.split("\n")[0].slice(0, 160)}` : ""}`)

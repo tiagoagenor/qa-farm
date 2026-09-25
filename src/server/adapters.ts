@@ -5,6 +5,7 @@ import { type Adb, fakeAdb, realAdb } from "./adb"
 import { type AppiumPool, fakeAppium, realAppium } from "./appium"
 import { type CatalogBuilder, fakeCatalog, realCatalog } from "./catalog"
 import { type Farm, fakeFarm, realFarm } from "./farm"
+import { type BrowserStackApi, fakeBrowserStack, realBrowserStack } from "./browserstack"
 import { fakeHostMetrics, type HostMetrics, realHostMetrics } from "./host-metrics"
 import { fakeRobot, realRobot, type RobotLauncher } from "./robot"
 import { fakeSnapshots, realSnapshots, type SnapshotProvider } from "./snapshot"
@@ -18,6 +19,7 @@ export interface Adapters {
   catalog: CatalogBuilder
   snapshots: SnapshotProvider
   metrics: HostMetrics
+  browserstack: BrowserStackApi
 }
 
 export function createAdapters(cfg: Config): Adapters {
@@ -31,6 +33,7 @@ export function createAdapters(cfg: Config): Adapters {
       catalog: fakeCatalog(cfg),
       snapshots: fakeSnapshots(cfg),
       metrics: fakeHostMetrics(cfg),
+      browserstack: fakeBrowserStack(cfg),
     }
   }
   return {
@@ -42,5 +45,6 @@ export function createAdapters(cfg: Config): Adapters {
     catalog: realCatalog(cfg),
     snapshots: realSnapshots(cfg),
     metrics: realHostMetrics(),
+    browserstack: realBrowserStack(cfg),
   }
 }

@@ -12,6 +12,7 @@ import type { Tone } from "@/lib/format"
 import { refY, sparkPath } from "@/lib/sparkline"
 import { cn } from "@/lib/utils"
 
+import { BrowserStackCard } from "./browserstack-card"
 import { MACHINE_STATE, MachineAdmin } from "./machine-admin"
 
 interface MachineDto {
@@ -260,6 +261,7 @@ export function MachineHealth() {
         </div>
       )}
       <MachineAdmin />
+      <BrowserStackCard />
     </div>
   )
 }

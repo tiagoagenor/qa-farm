@@ -33,6 +33,13 @@ export interface Config {
   caseMemMb: number
   /** memória do MESTRE usada pelo processo robot de um caso em celular remoto */
   robotMemMb: number
+  /** BrowserStack App Automate (credenciais só no .env do painel) */
+  bsUser: string
+  bsKey: string
+  bsApiUrl: string
+  bsHubUrl: string
+  /** vagas da conta que a fazenda deixa livres (o time usa a mesma conta; evita cair na fila do BrowserStack) */
+  bsReserve: number
   /** arquivo de esperas do projeto Robot (relativo à raiz do projeto), multiplicado pelo "Esperas ×N" da fila */
   robotTimeoutFile: string
   /** worker sem resposta há mais que isso = offline: casos dele viram erro de infra e voltam para a fila */
@@ -82,6 +89,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     caseMemMb: num(env.QAFARM_CASE_MEM_MB, 150),
     robotMemMb: num(env.QAFARM_ROBOT_MEM_MB, 120),
     robotTimeoutFile: env.QAFARM_ROBOT_TIMEOUT_FILE ?? "testsData/timeoutVariables.py",
+    bsUser: env.QAFARM_BS_USER ?? "",
+    bsKey: env.QAFARM_BS_KEY ?? "",
+    bsApiUrl: env.QAFARM_BS_API_URL ?? "https://api-cloud.browserstack.com",
+    bsHubUrl: env.QAFARM_BS_HUB_URL ?? "https://hub.browserstack.com/wd/hub",
+    bsReserve: num(env.QAFARM_BS_RESERVE, 1),
     remoteOfflineMs: num(env.QAFARM_REMOTE_OFFLINE_MS, 15_000),
     // troca de versão do APK: instala em até 5 celulares ao mesmo tempo (cada emulador usa os próprios núcleos)
     installConcurrency: num(env.QAFARM_INSTALL_CONCURRENCY, 5),
