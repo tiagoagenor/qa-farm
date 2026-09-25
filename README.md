@@ -46,6 +46,31 @@ Primeira instalação (já feita): `git clone git@github.com:tiagoagenor/qa-farm
 | `catalog/catalog.json` | catálogo de casos gerado do projeto |
 | `logs/` | `runner.log`, `web.log`, `farm.log`, `appium-g<grupo>.log` |
 
+## Máquinas: saúde e fazenda com várias máquinas
+
+**Página Máquinas** (`/maquinas`): memória, processador (por thread) e temperatura (processador e núcleos) de
+cada máquina, ao vivo, com mini-gráficos de 30 min. Lido de `/proc` e `/sys/class/hwmon` — sem sudo. Com saúde
+crítica (temperatura ≥ 85 °C, troca ativa com o swap, CPU saturada) a máquina **não recebe casos novos**; os que
+estão rodando terminam. O ponto no menu fica amarelo/vermelho.
+
+**Mais máquinas na fazenda:** este servidor é o **mestre** (painel, filas, execução do Robot e resultados). Outra
+máquina entra como **worker**: roda só um agente leve (emuladores, adb, Appium, métricas) e o mestre fala com ela
+por um **túnel SSH** que ele mesmo abre (nenhuma porta nova exposta; o agente escuta em `127.0.0.1:7100`).
+
+1. Na máquina nova (Ubuntu, com KVM), com sudo: `usermod -aG kvm <usuário>`, `loginctl enable-linger <usuário>` e
+   as bibliotecas do emulador (`libx11-xcb1 libnss3 libpulse0 libgl1 libegl1 libgbm1 libxcomposite1 libxcursor1
+   libxi6 libxtst6 libxkbfile1 libxcb-cursor0 libasound2t64`).
+2. Copie para ela, nas mesmas versões do mestre: `~/jdk`, `~/node` (com Appium), `~/.appium` e `~/android-sdk`.
+3. Em **Máquinas → Adicionar máquina**: ID, IP (LAN ou WireGuard), usuário e porta SSH, máximo de emuladores.
+   Autorize a chave pública do mestre mostrada na tela (`~/.ssh/authorized_keys` do usuário SSH).
+4. **Testar conexão** → **Instalar / atualizar agente** (copia `dist/agent.mjs` + scripts, grava `~/qa-farm-agent/.env`
+   e o crontab) → **Ligar emuladores…**. Os celulares dela aparecem em Celulares numa seção própria e entram nas filas.
+
+Celular de worker: serial `server02:emulator-5554`, índice global `100 × slot + local` (farm-03 do slot 1 = 103).
+Se o worker cair, os casos dele viram erro de infraestrutura e voltam para a fila (outra máquina); os emuladores
+dele não são reiniciados pelo mestre. Depois de atualizar o mestre, use "Instalar / atualizar agente" para manter o
+mesmo commit nos workers.
+
 ## Desenvolvimento (Mac, sem emuladores)
 
 ```bash
