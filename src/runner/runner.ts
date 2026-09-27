@@ -10,6 +10,7 @@ import type { Config } from "@/core/config"
 import { newId } from "@/core/ids"
 import { deviceKey, dispatchBudget, globalIndex, interleaveByMachine, parseDeviceKey, splitIndex } from "@/core/machines"
 import { BS_APP_MAX_AGE_MS, BS_MACHINE_ID, BsAppsSchema, bsBudget, type BsPlan, type BsState, BsStateSchema, nextSlotId, slotIdFromKey, slotIndex, slotKey } from "@/core/browserstack"
+import { InfraBreaker } from "@/core/infra-breaker"
 import { evaluateHealth, type HealthResult, type HealthState } from "@/core/health"
 import { type HostSample, MetricsFileSchema, MetricsHistory } from "@/core/metrics"
 import { parseMassa } from "@/core/massa"
@@ -160,6 +161,8 @@ export class Runner {
   /** robots de worker a encerrar/apagar (mestre reiniciou, worker sumiu no meio do caso) */
   private remoteCleanup: Array<{ host: string; runId: string; since: number }> = []
   private lastBsHostLog = 0
+  /** celular com erros de infraestrutura seguidos fica pausado (não consome a fila caso a caso) */
+  private breaker = new InfraBreaker()
   /** envio do projeto para o worker falhou: por um tempo o robot dos celulares dele volta para o mestre */
   private workspaceFailAt = new Map<string, number>()
   private bsPlan: BsPlan | null = null
@@ -1254,6 +1257,14 @@ export class Runner {
         })
       }
     }
+    // pausados pelo disjuntor aparecem com a explicação (e não recebem casos no despacho)
+    for (const [serial, d] of next) {
+      const until = this.breaker.blockedUntil(serial)
+      if (until) {
+        const hhmm = new Date(until).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+        next.set(serial, { ...d, note: `Pausado: erros de infraestrutura seguidos (volta às ${hhmm})` })
+      }
+    }
     this.devices = next
     const appiumReady: Record<string, boolean> = {}
     for (const d of next.values()) if (d.index) appiumReady[d.serial] = d.state === "ready" || d.state === "busy"
@@ -1356,6 +1367,7 @@ export class Runner {
     await this.pickActiveApp()
     const free = [...this.devices.values()]
       .filter((d) => d.enabled !== false && (d.kind === "emulator" || d.enabled) && d.state === "ready" && d.index && ![...this.running.values()].some((r) => r.serial === d.serial))
+      .filter((d) => !this.breaker.blockedUntil(d.serial))
       .map((d) => ({ serial: d.serial, index: d.index!, machineId: d.machineId }))
     if (free.length === 0) return
     const queues = [...this.queues.values()].filter((q) => q.appId === this.activeAppId)
@@ -1766,6 +1778,12 @@ export class Runner {
     await writeJsonAtomic(path.join(ra.dir, "result.json"), { ...result, finishedAt: finishedAt.toISOString() })
     this.running.delete(`${ra.queueId}/${ra.itemId}`)
     this.updateQueue(ra.queueId, (cur) => applyResult(cur, ra.itemId, ra.n, result, finishedAt))
+    if (!ra.canceled) {
+      const b = this.breaker.record(ra.serial, result.status)
+      if (b.tripped) {
+        this.log(`${ra.serial}: ${b.streak} erros de infraestrutura seguidos → pausado por 5 min (os casos seguem nos outros celulares)`)
+      }
+    }
     this.log(`■ ${ra.queueId}/${ra.itemId} em ${ra.serial}: ${result.status}${result.message ? ` — ${result.message.split("\n")[0].slice(0, 160)}` : ""}`)
     await this.afterCase(ra)
     const d = this.devices.get(ra.serial)
