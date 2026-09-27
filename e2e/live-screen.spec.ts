@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import { command, ensureDevices, login } from "./helpers"
+import { catalogIds, command, ensureApp, ensureDevices, login } from "./helpers"
 
 test.beforeEach(async ({ page }) => {
   await login(page)
@@ -54,4 +54,34 @@ test("limite 1: um segundo celular ao mesmo tempo é recusado com a explicação
     timeout: 15_000,
   })
   await other.close()
+})
+
+test("fila: caso rodando tem o ícone Ao vivo no celular; clicar abre a tela daquele celular", async ({
+  page,
+}) => {
+  // Arrange
+  const appId = await ensureApp(page.request)
+  const ids = await catalogIds(page.request, (n) => n.includes("TIMEOUT"))
+  const res = await command(page.request, {
+    type: "create_queue",
+    input: {
+      name: "ao vivo na fila",
+      appId,
+      env: "hml",
+      timeoutSec: 120,
+      retries: 0,
+      testIds: ids.slice(0, 1),
+    },
+  })
+  const qid = res.data!.queueId as string
+  await page.goto(`/filas/${qid}`)
+  const icon = page.getByTestId("item-live").first()
+  await expect(icon).toBeVisible({ timeout: 30_000 })
+
+  // Act
+  await icon.click()
+
+  // Assert
+  await expect(page.getByTestId("live-fake")).toContainText("fake:emulator-", { timeout: 15_000 })
+  await command(page.request, { type: "cancel_queue", queueId: qid })
 })

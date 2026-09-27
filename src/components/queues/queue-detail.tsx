@@ -74,6 +74,10 @@ import { allGroupKeys, buildTreeRows, type TreeRow } from "@/lib/catalog-tree"
 import { type ColumnDef, visibleColumns } from "@/lib/table-columns"
 import { type GroupStats, groupStats, type QueueTreeEntry, queueTreeEntries } from "@/lib/queue-tree"
 
+import { LiveButton } from "@/components/devices/live-button"
+import { LiveScreenDialog, type ScreenInfo } from "@/components/devices/live-screen"
+import { ScreenDialog } from "@/components/devices/screen-dialog"
+
 import { ItemSheet } from "./item-sheet"
 import { DeleteQueueButton, elapsedRange, ResultBar } from "./queue-list"
 import type { QueueDetailDto } from "./types"
@@ -181,6 +185,9 @@ function ItemRow({
   indent = 0,
   onOpen,
   onRetry,
+  liveOn,
+  onLive,
+  onScreen,
 }: {
   it: Item
   now: number
@@ -189,6 +196,9 @@ function ItemRow({
   indent?: number
   onOpen: (id: string) => void
   onRetry: (id: string) => void
+  liveOn: boolean
+  onLive: (serial: string) => void
+  onScreen: (serial: string) => void
 }) {
   const a = it.attempts[it.attempts.length - 1]
   const shot = a?.screenshots?.[a.screenshots.length - 1]
@@ -210,9 +220,22 @@ function ItemRow({
         )}
       </TableCell>
     ),
-    celular: <TableCell className="font-mono text-xs">
-          {a ? (a.machineId ? `${a.machineId} · ${a.serial.slice(a.machineId.length + 1)}` : a.serial) : "—"}
-        </TableCell>,
+    celular: (
+      <TableCell className="font-mono text-xs">
+        <div className="flex items-center gap-1">
+          <span className="truncate">
+            {a
+              ? a.machineId
+                ? `${a.machineId} · ${a.serial.slice(a.machineId.length + 1)}`
+                : a.serial
+              : "—"}
+          </span>
+          {a && it.status === "running" && a.status === "running" && (
+            <LiveButton serial={a.serial} liveOn={liveOn} onLive={onLive} onScreen={onScreen} size="xs" />
+          )}
+        </div>
+      </TableCell>
+    ),
     massa: (
       <TableCell data-testid="item-massa">
         {label ? (
@@ -325,12 +348,27 @@ function ItemRow({
 }
 
 /** Opções que podem mudar a qualquer momento, inclusive com a fila rodando. */
-function QueueOptionsBar({ q, busy, run }: { q: Queue; busy: boolean; run: (cmd: Parameters<typeof sendCommand>[0]) => Promise<void> }) {
+function QueueOptionsBar({
+  q,
+  busy,
+  run,
+}: {
+  q: Queue
+  busy: boolean
+  run: (cmd: Parameters<typeof sendCommand>[0]) => Promise<void>
+}) {
   return (
-    <div className="bg-muted/30 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border px-4 py-2 text-sm" data-testid="queue-options">
+    <div
+      className="bg-muted/30 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border px-4 py-2 text-sm"
+      data-testid="queue-options"
+    >
       <label className="flex items-center gap-2">
         <span className="text-muted-foreground">Tentativas extras</span>
-        <Select value={String(q.options.retries)} onValueChange={(v) => run({ type: "set_queue_retries", queueId: q.id, retries: Number(v) })} disabled={busy}>
+        <Select
+          value={String(q.options.retries)}
+          onValueChange={(v) => run({ type: "set_queue_retries", queueId: q.id, retries: Number(v) })}
+          disabled={busy}
+        >
           <SelectTrigger className="h-8 w-20" data-testid="queue-retries">
             <SelectValue />
           </SelectTrigger>
@@ -363,7 +401,8 @@ function QueueOptionsBar({ q, busy, run }: { q: Queue; busy: boolean; run: (cmd:
         </Select>
       </label>
       <span className="text-muted-foreground text-xs">
-        Aumentar as tentativas recoloca na fila os casos que falharam (até o novo limite). Vale na hora, mesmo com a fila rodando.
+        Aumentar as tentativas recoloca na fila os casos que falharam (até o novo limite). Vale na hora, mesmo
+        com a fila rodando.
       </span>
     </div>
   )
@@ -376,6 +415,10 @@ export function QueueDetail({ id }: { id: string }) {
   const [view, setView] = useState<"tree" | "list">("tree")
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [openItem, setOpenItem] = useState<string | null>(null)
+  const [liveSerial, setLive] = useState<string | null>(null)
+  const [screen, setScreen] = useState<string | null>(null)
+  const { data: screenInfo } = usePoll<ScreenInfo>("/api/screen", 10_000)
+  const liveOn = !!screenInfo?.alive && screenInfo.max > 0
   const [busy, setBusy] = useState(false)
   const columns = useColumnPrefs("qafarm.queue-detail.columns", ITEM_COLUMNS)
   const cols = visibleColumns(ITEM_COLUMNS, columns.prefs)
@@ -431,6 +474,9 @@ export function QueueDetail({ id }: { id: string }) {
   const rowProps = {
     now,
     busy,
+    liveOn,
+    onLive: setLive,
+    onScreen: setScreen,
     onOpen: setOpenItem,
     onRetry: (itemId: string) => run({ type: "retry_item", queueId: q.id, itemId }),
     cols: colKeys,
@@ -680,7 +726,12 @@ export function QueueDetail({ id }: { id: string }) {
         item={selectedItem}
         onOpenChange={(o) => !o && setOpenItem(null)}
         onRetry={(itemId) => run({ type: "retry_item", queueId: q.id, itemId })}
+        liveOn={liveOn}
+        onLive={setLive}
+        onScreen={setScreen}
       />
+      <LiveScreenDialog serial={liveSerial} onClose={() => setLive(null)} />
+      <ScreenDialog serial={screen} onClose={() => setScreen(null)} />
     </div>
   )
 }

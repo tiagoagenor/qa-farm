@@ -13,11 +13,23 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getJson } from "@/lib/client"
 import { durationBetween, formatDateTime, formatDuration, ITEM_STATUS, runFileUrl } from "@/lib/format"
 
+import { LiveButton } from "@/components/devices/live-button"
+
 import { MassaView } from "./massa-view"
 
 const MAX_CONSOLE = 400_000
 
-function ConsoleView({ queueId, itemId, n, live }: { queueId: string; itemId: string; n: number; live: boolean }) {
+function ConsoleView({
+  queueId,
+  itemId,
+  n,
+  live,
+}: {
+  queueId: string
+  itemId: string
+  n: number
+  live: boolean
+}) {
   const [text, setText] = useState("")
   const offset = useRef(0)
   const box = useRef<HTMLPreElement>(null)
@@ -47,7 +59,11 @@ function ConsoleView({ queueId, itemId, n, live }: { queueId: string; itemId: st
 
   return (
     <ScrollArea className="bg-muted/40 h-[45vh] rounded-md border">
-      <pre ref={box} className="p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap" data-testid="console-text">
+      <pre
+        ref={box}
+        className="p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
+        data-testid="console-text"
+      >
         {text || "(sem saída ainda)"}
       </pre>
     </ScrollArea>
@@ -59,11 +75,17 @@ export function ItemSheet({
   item,
   onOpenChange,
   onRetry,
+  liveOn = false,
+  onLive,
+  onScreen,
 }: {
   queueId: string
   item: Item | null
   onOpenChange: (o: boolean) => void
   onRetry?: (itemId: string) => void
+  liveOn?: boolean
+  onLive?: (serial: string) => void
+  onScreen?: (serial: string) => void
 }) {
   const [n, setN] = useState<number | null>(null)
   const attempts = item?.attempts ?? []
@@ -81,7 +103,8 @@ export function ItemSheet({
             <SheetHeader>
               <SheetTitle className="pr-6 break-all">{item.name}</SheetTitle>
               <SheetDescription>
-                {item.file} · {item.accounts.length ? `conta: ${item.accounts.join(", ")}` : "sem conta detectada"}
+                {item.file} ·{" "}
+                {item.accounts.length ? `conta: ${item.accounts.join(", ")}` : "sem conta detectada"}
               </SheetDescription>
             </SheetHeader>
             <div className="grid gap-4 overflow-auto px-4 pb-6">
@@ -89,7 +112,13 @@ export function ItemSheet({
                 <StatusBadge {...ITEM_STATUS[item.status]} />
                 <span className="text-muted-foreground text-sm">{attempts.length} tentativa(s)</span>
                 {onRetry && RETRYABLE_ITEM_STATUSES.has(item.status) && (
-                  <Button size="sm" variant="outline" className="ml-auto" onClick={() => onRetry(item.id)} data-testid="retry-item-sheet">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto"
+                    onClick={() => onRetry(item.id)}
+                    data-testid="retry-item-sheet"
+                  >
                     <RotateCcw /> Rodar de novo
                   </Button>
                 )}
@@ -118,7 +147,18 @@ export function ItemSheet({
                         </div>
                         <div>
                           <p className="text-muted-foreground text-xs">Celular</p>
-                          <p className="font-mono text-xs">{current.serial}</p>
+                          <div className="flex items-center gap-1">
+                            <p className="font-mono text-xs">{current.serial}</p>
+                            {current.status === "running" && onLive && onScreen && (
+                              <LiveButton
+                                serial={current.serial}
+                                liveOn={liveOn}
+                                onLive={onLive}
+                                onScreen={onScreen}
+                                size="xs"
+                              />
+                            )}
+                          </div>
                           {current.robotOn && (
                             <p className="text-muted-foreground text-[11px]" data-testid="attempt-robot-on">
                               robot em {current.robotOn}
@@ -131,25 +171,41 @@ export function ItemSheet({
                         </div>
                         <div>
                           <p className="text-muted-foreground text-xs">Duração</p>
-                          <p className="text-xs">{formatDuration(durationBetween(current.startedAt, current.endedAt))}</p>
+                          <p className="text-xs">
+                            {formatDuration(durationBetween(current.startedAt, current.endedAt))}
+                          </p>
                         </div>
                       </div>
-                      <MassaView entries={current.massa} live={current.status === "running"} accounts={item.accounts} />
+                      <MassaView
+                        entries={current.massa}
+                        live={current.status === "running"}
+                        accounts={item.accounts}
+                      />
                       {current.message && (
                         <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3">
                           <p className="mb-1 text-xs font-medium">Erro</p>
-                          <p className="font-mono text-xs break-words whitespace-pre-wrap" data-testid="attempt-message">
+                          <p
+                            className="font-mono text-xs break-words whitespace-pre-wrap"
+                            data-testid="attempt-message"
+                          >
                             {current.message}
                           </p>
                           {current.teardownMessage && (
-                            <p className="text-muted-foreground mt-2 text-xs">Teardown: {current.teardownMessage}</p>
+                            <p className="text-muted-foreground mt-2 text-xs">
+                              Teardown: {current.teardownMessage}
+                            </p>
                           )}
                         </div>
                       )}
                       <div className="flex flex-wrap gap-2">
                         {current.cloudUrl && (
                           <Button variant="outline" size="sm" asChild>
-                            <a href={current.cloudUrl} target="_blank" rel="noreferrer" data-testid="cloud-link">
+                            <a
+                              href={current.cloudUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              data-testid="cloud-link"
+                            >
                               Vídeo e logs no BrowserStack <ExternalLink />
                             </a>
                           </Button>
@@ -165,16 +221,33 @@ export function ItemSheet({
                       {!!current.screenshots?.length && (
                         <div className="flex flex-wrap gap-2">
                           {current.screenshots.map((s) => (
-                            <a key={s} href={runFileUrl(current.dir, s)} target="_blank" rel="noreferrer" title={s}>
+                            <a
+                              key={s}
+                              href={runFileUrl(current.dir, s)}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={s}
+                            >
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={runFileUrl(current.dir, s)} alt={s} className="h-40 rounded border object-contain" />
+                              <img
+                                src={runFileUrl(current.dir, s)}
+                                alt={s}
+                                className="h-40 rounded border object-contain"
+                              />
                             </a>
                           ))}
                         </div>
                       )}
                       <div>
-                        <p className="mb-1 text-xs font-medium">Console {current.status === "running" && "(ao vivo)"}</p>
-                        <ConsoleView queueId={queueId} itemId={item.id} n={current.n} live={current.status === "running"} />
+                        <p className="mb-1 text-xs font-medium">
+                          Console {current.status === "running" && "(ao vivo)"}
+                        </p>
+                        <ConsoleView
+                          queueId={queueId}
+                          itemId={item.id}
+                          n={current.n}
+                          live={current.status === "running"}
+                        />
                       </div>
                     </div>
                   )}
