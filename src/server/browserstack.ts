@@ -27,6 +27,8 @@ export interface BrowserStackApi {
   session(sessionId: string): Promise<BsSessionInfo>
   /** encerra a sessão remota (caso morto por timeout/cancelamento não pode segurar a vaga) */
   deleteSession(sessionId: string): Promise<void>
+  /** print da tela da sessão em andamento (comando WebDriver; aparece no log da sessão) */
+  screenshot(sessionId: string): Promise<Buffer | null>
 }
 
 export function realBrowserStack(cfg: Config): BrowserStackApi {
@@ -34,9 +36,23 @@ export function realBrowserStack(cfg: Config): BrowserStackApi {
   const key = cfg.bsKey
   const api = cfg.bsApiUrl.replace(/\/$/, "")
   const auth = `Basic ${Buffer.from(`${user}:${key}`).toString("base64")}`
-  const call = async (method: string, p: string, body?: BodyInit, headers: Record<string, string> = {}, ms = 30_000) => {
-    const r = await fetch(`${api}${p}`, { method, body, headers: { Authorization: auth, ...headers }, signal: AbortSignal.timeout(ms) })
-    if (!r.ok) throw new Error(`BrowserStack ${method} ${p.split("?")[0]} → ${r.status} ${(await r.text().catch(() => "")).slice(0, 200)}`)
+  const call = async (
+    method: string,
+    p: string,
+    body?: BodyInit,
+    headers: Record<string, string> = {},
+    ms = 30_000,
+  ) => {
+    const r = await fetch(`${api}${p}`, {
+      method,
+      body,
+      headers: { Authorization: auth, ...headers },
+      signal: AbortSignal.timeout(ms),
+    })
+    if (!r.ok)
+      throw new Error(
+        `BrowserStack ${method} ${p.split("?")[0]} → ${r.status} ${(await r.text().catch(() => "")).slice(0, 200)}`,
+      )
     return r
   }
   return {
@@ -45,7 +61,8 @@ export function realBrowserStack(cfg: Config): BrowserStackApi {
     secrets: [key],
     hubUrl: cfg.bsHubUrl,
     plan: async () => BsPlanSchema.parse(await (await call("GET", "/app-automate/plan.json")).json()),
-    devices: async () => BsDeviceSchema.array().parse(await (await call("GET", "/app-automate/devices.json")).json()),
+    devices: async () =>
+      BsDeviceSchema.array().parse(await (await call("GET", "/app-automate/devices.json")).json()),
     async upload(apkPath, customId) {
       const form = new FormData()
       form.set("file", await fs.openAsBlob(apkPath), path.basename(apkPath))
@@ -56,13 +73,25 @@ export function realBrowserStack(cfg: Config): BrowserStackApi {
       return j.app_url
     },
     async setSessionStatus(id, status, reason) {
-      await call("PUT", `/app-automate/sessions/${encodeURIComponent(id)}.json`, JSON.stringify({ status, reason: reason.slice(0, 250) }), {
-        "Content-Type": "application/json",
-      })
+      await call(
+        "PUT",
+        `/app-automate/sessions/${encodeURIComponent(id)}.json`,
+        JSON.stringify({ status, reason: reason.slice(0, 250) }),
+        {
+          "Content-Type": "application/json",
+        },
+      )
     },
     async session(id) {
-      const j = (await (await call("GET", `/app-automate/sessions/${encodeURIComponent(id)}.json`)).json()) as {
-        automation_session?: { status?: string; public_url?: string; browser_url?: string; video_url?: string }
+      const j = (await (
+        await call("GET", `/app-automate/sessions/${encodeURIComponent(id)}.json`)
+      ).json()) as {
+        automation_session?: {
+          status?: string
+          public_url?: string
+          browser_url?: string
+          video_url?: string
+        }
       }
       const s = j.automation_session ?? {}
       return { status: s.status, publicUrl: s.public_url ?? s.browser_url, videoUrl: s.video_url }
@@ -74,14 +103,37 @@ export function realBrowserStack(cfg: Config): BrowserStackApi {
         signal: AbortSignal.timeout(20_000),
       }).catch(() => undefined)
     },
+    async screenshot(id) {
+      const r = await fetch(
+        `${cfg.bsHubUrl.replace(/\/$/, "")}/session/${encodeURIComponent(id)}/screenshot`,
+        {
+          headers: { Authorization: auth },
+          signal: AbortSignal.timeout(20_000),
+        },
+      ).catch(() => null)
+      if (!r?.ok) return null
+      const j = (await r.json().catch(() => ({}))) as { value?: unknown }
+      return typeof j.value === "string" && j.value ? Buffer.from(j.value, "base64") : null
+    },
   }
 }
 
 /** Fake (modo simulado): plano e sessões num arquivo do "mundo" simulado. */
 export function fakeBrowserStack(cfg: Config): BrowserStackApi {
   const file = path.join(cfg.dataDir, "fake", "browserstack.json")
-  type S = { running?: number; max?: number; uploads: string[]; statuses: Record<string, string>; deleted: string[] }
-  const read = async (): Promise<S> => ({ uploads: [], statuses: {}, deleted: [], ...JSON.parse(await fsp.readFile(file, "utf8").catch(() => "{}")) })
+  type S = {
+    running?: number
+    max?: number
+    uploads: string[]
+    statuses: Record<string, string>
+    deleted: string[]
+  }
+  const read = async (): Promise<S> => ({
+    uploads: [],
+    statuses: {},
+    deleted: [],
+    ...JSON.parse(await fsp.readFile(file, "utf8").catch(() => "{}")),
+  })
   // leitura-alteração-gravação serializada (casos terminando juntos não podem perder registros)
   let chain: Promise<unknown> = Promise.resolve()
   const update = (fn: (s: S) => void) => {
@@ -119,10 +171,20 @@ export function fakeBrowserStack(cfg: Config): BrowserStackApi {
       })
     },
     async session(id) {
-      return { status: "done", publicUrl: `https://app-automate.fake-browserstack.invalid/builds/x/sessions/${id}` }
+      return {
+        status: "done",
+        publicUrl: `https://app-automate.fake-browserstack.invalid/builds/x/sessions/${id}`,
+      }
     },
     async deleteSession(id) {
       await update((s) => s.deleted.push(id))
+    },
+    async screenshot() {
+      // PNG 1x1 (modo simulado)
+      return Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mN8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+        "base64",
+      )
     },
   }
 }

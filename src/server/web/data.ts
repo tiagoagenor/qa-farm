@@ -45,7 +45,10 @@ export async function readMetrics() {
   const now = Date.now()
   return {
     updatedAt: m?.updatedAt ?? null,
-    machines: (m?.machines ?? []).map((x) => ({ ...x, ageMs: x.sample ? now - Date.parse(x.sample.at) : null })),
+    machines: (m?.machines ?? []).map((x) => ({
+      ...x,
+      ageMs: x.sample ? now - Date.parse(x.sample.at) : null,
+    })),
   }
 }
 
@@ -86,9 +89,35 @@ export async function readBrowserStack() {
         .nullable(),
       null,
     ),
-    readJson(path.join(p.state, "browserstack-devices.json"), z.object({ devices: BsDeviceSchema.array() }).nullable(), null),
+    readJson(
+      path.join(p.state, "browserstack-devices.json"),
+      z.object({ devices: BsDeviceSchema.array() }).nullable(),
+      null,
+    ),
   ])
   return { ...state, status, devices: devices?.devices ?? [] }
+}
+
+/**
+ * Sessão do BrowserStack em andamento numa vaga ("browserstack:N"): o caso que está rodando nela e o id da
+ * sessão (session.json da tentativa, gravado pelo listener). null = vaga sem caso rodando agora.
+ */
+export async function bsRunningSession(serial: string): Promise<string | null> {
+  const { p } = ctx()
+  const dev = (await readJson(p.devicesState, DevicesStateSchema.nullable(), null))?.devices.find(
+    (d) => d.serial === serial,
+  )
+  if (!dev || dev.kind !== "cloud" || dev.state !== "busy" || !dev.currentQueueId || !dev.currentItemId)
+    return null
+  const q = await readJson(p.queue(dev.currentQueueId), QueueSchema.nullable(), null)
+  const att = q?.items.find((i) => i.id === dev.currentItemId)?.attempts.at(-1)
+  if (!att || att.status !== "running") return null
+  const s = await readJson(
+    path.join(p.runs, att.dir, "session.json"),
+    z.object({ sessionId: z.string().nullable().optional() }).nullable(),
+    null,
+  )
+  return s?.sessionId ?? null
 }
 
 /** Cliente do agente para um celular de worker ("server02:emulator-5554"), ou null se for do mestre. */
@@ -129,7 +158,9 @@ export async function listApps(): Promise<Array<AppMeta & { queues: number; acti
     .map((m) => ({
       ...m,
       queues: queues.filter((q) => q.appId === m.id).length,
-      activeQueues: queues.filter((q) => q.appId === m.id && (q.status === "running" || q.status === "paused")).length,
+      activeQueues: queues.filter(
+        (q) => q.appId === m.id && (q.status === "running" || q.status === "paused"),
+      ).length,
     }))
     .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt))
 }
@@ -164,7 +195,9 @@ export async function withLiveMassa(q: Queue): Promise<Queue> {
       const attempts = await Promise.all(
         it.attempts.map(async (a) => {
           if (a.endedAt) return a
-          const text = await fsp.readFile(path.join(ctx().p.runs, a.dir, "massa.json"), "utf8").catch(() => undefined)
+          const text = await fsp
+            .readFile(path.join(ctx().p.runs, a.dir, "massa.json"), "utf8")
+            .catch(() => undefined)
           const massa = parseMassa(text)
           return massa.length ? { ...a, massa } : a
         }),
