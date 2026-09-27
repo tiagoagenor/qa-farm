@@ -55,7 +55,7 @@ export interface MachineRow {
 }
 export interface MachinesDto {
   master: { id: string }
-  settings: { maxParallel: number }
+  settings: { maxParallel: number; maxScreenSessions?: number }
   publicKey: string | null
   machines: MachineRow[]
 }
@@ -273,6 +273,38 @@ function ParallelLimit({ value, onSaved }: { value: number; onSaved: () => void 
   )
 }
 
+/** Máximo de celulares com tela ao vivo (scrcpy no painel) ao mesmo tempo. */
+function ScreenLimit({ value, onSaved }: { value: number; onSaved: () => void }) {
+  const [v, setV] = useState<string | null>(null)
+  const cur = v ?? String(value)
+  const n = Number(cur)
+  const ok = Number.isInteger(n) && n >= 0 && n <= 20 && n !== value
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2 text-sm" data-testid="screen-limit">
+      <span className="font-medium">Celulares ao vivo ao mesmo tempo (máx.)</span>
+      <Input type="number" min={0} max={20} className="h-8 w-20" value={cur} onChange={(e) => setV(e.target.value)} data-testid="screen-limit-input" />
+      <Button
+        size="sm"
+        disabled={!ok}
+        data-testid="screen-limit-save"
+        onClick={async () => {
+          const r = await sendCommand({ type: "set_settings", maxScreenSessions: n })
+          if (r?.ok) {
+            setV(null)
+            onSaved()
+          }
+        }}
+      >
+        Salvar
+      </Button>
+      <span className="text-muted-foreground text-xs">
+        Hoje: {value ? value : "desligado"}. 0 = desliga o “Ao vivo”. Cada celular transmitindo usa processador do servidor dele; várias pessoas
+        olhando o mesmo celular contam como 1.
+      </span>
+    </div>
+  )
+}
+
 /** Cadastro das máquinas worker (IP, SSH, agente, ativar/desativar) — o mestre é este servidor. */
 export function MachineAdmin() {
   const { data, reload } = usePoll<MachinesDto>("/api/machines", 3000)
@@ -301,6 +333,7 @@ export function MachineAdmin() {
       </CardHeader>
       <CardContent className="grid gap-4 px-5">
         {data && <ParallelLimit value={data.settings?.maxParallel ?? 0} onSaved={() => void reload()} />}
+        {data && <ScreenLimit value={data.settings?.maxScreenSessions ?? 3} onSaved={() => void reload()} />}
         <div className="rounded-md border">
           <Table>
             <TableHeader>

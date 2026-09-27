@@ -46,6 +46,7 @@ const procs = [
   spawn(bin("next"), ["start", "-p", port], { cwd: root, env, stdio: "inherit" }),
   spawn(process.execPath, ["dist/runner.mjs"], { cwd: root, env, stdio: "inherit" }),
   spawn(process.execPath, ["dist/agent.mjs"], { cwd: root, env: workerEnv, stdio: "inherit" }),
+  spawn(process.execPath, ["dist/screen.mjs"], { cwd: root, env: { ...env, PORT: port, QAFARM_SCREEN_PORT: process.env.E2E_SCREEN_PORT ?? "3201" }, stdio: "inherit" }),
 ]
 const stop = () => {
   for (const p of procs) p.kill("SIGTERM")

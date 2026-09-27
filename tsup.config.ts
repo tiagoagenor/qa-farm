@@ -2,7 +2,7 @@ import { defineConfig } from "tsup"
 
 export default defineConfig([
   {
-    entry: { runner: "src/runner/main.ts" },
+    entry: { runner: "src/runner/main.ts", screen: "src/screen/main.ts" },
     outDir: "dist",
     format: ["esm"],
     platform: "node",

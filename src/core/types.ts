@@ -212,6 +212,8 @@ export type PhysicalState = z.infer<typeof PhysicalStateSchema>
 export const SettingsSchema = z.object({
   /** máximo de casos rodando ao mesmo tempo no pool todo (o robot de todo caso roda no mestre); 0 = sem limite */
   maxParallel: z.number().int().min(0).max(200).default(0),
+  /** máximo de celulares com tela ao vivo (scrcpy no painel) ao mesmo tempo; 0 = desligado */
+  maxScreenSessions: z.number().int().min(0).max(20).default(3),
 })
 export type Settings = z.infer<typeof SettingsSchema>
 
@@ -242,7 +244,11 @@ export const CommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("retry_item"), queueId: z.string(), itemId: z.string() }),
   z.object({ type: z.literal("set_queue_retries"), queueId: z.string(), retries: z.number().int().min(0).max(10) }),
   z.object({ type: z.literal("set_queue_wait_factor"), queueId: z.string(), waitFactor: z.number().min(1).max(5) }),
-  z.object({ type: z.literal("set_settings"), maxParallel: z.number().int().min(0).max(200) }),
+  z.object({
+    type: z.literal("set_settings"),
+    maxParallel: z.number().int().min(0).max(200).optional(),
+    maxScreenSessions: z.number().int().min(0).max(20).optional(),
+  }),
   z.object({ type: z.literal("bs_set_enabled"), enabled: z.boolean() }),
   z.object({ type: z.literal("bs_add_slot"), device: z.string().min(1).max(80), osVersion: z.string().min(1).max(20) }),
   z.object({ type: z.literal("bs_remove_slot"), id: z.number().int() }),

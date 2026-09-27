@@ -154,7 +154,7 @@ export class Runner {
   private readonly adb: Adb
   private readonly appium: AppiumPool
   private lastStatusWrite = 0
-  private settings: Settings = { maxParallel: 0 }
+  private settings: Settings = { maxParallel: 0, maxScreenSessions: 3 }
   // BrowserStack: vagas, plano (sessões paralelas da conta) e APKs já enviados
   private bs: BsState = { enabled: false, slots: [] }
   /** robots de worker a encerrar/apagar (mestre reiniciou, worker sumiu no meio do caso) */
@@ -257,7 +257,7 @@ export class Runner {
     await this.remote.ensureKey().catch((e: Error) => this.log(`não consegui criar a chave SSH do mestre: ${e.message}`))
     this.physical = new Map(Object.entries((await readJson(this.p.physical, PhysicalStateSchema, { enabled: {} })).enabled))
     this.disabledEmulators = new Set((await readJson(this.p.emulatorsDisabled, EmulatorsDisabledSchema, { disabled: [] })).disabled)
-    this.settings = await readJson(this.p.settings, SettingsSchema, { maxParallel: 0 })
+    this.settings = await readJson(this.p.settings, SettingsSchema, { maxParallel: 0, maxScreenSessions: 3 })
     this.bs = await readJson(this.p.browserstack, BsStateSchema, { enabled: false, slots: [] })
     this.bsApps = (await readJson(this.p.browserstackApps, BsAppsSchema, { apps: {} })).apps
     const saved = await readJson(this.p.metrics, MetricsFileSchema.nullable(), null)
@@ -822,12 +822,21 @@ export class Runner {
         }
       }
       case "set_settings": {
-        this.settings = { ...this.settings, maxParallel: c.maxParallel }
-        await writeJsonAtomic(this.p.settings, this.settings)
-        return {
-          ok: true,
-          message: c.maxParallel ? `Máximo de ${c.maxParallel} caso(s) ao mesmo tempo (os que já estão rodando continuam)` : "Sem limite de casos ao mesmo tempo",
+        // só os campos enviados mudam (a tela de cada limite manda o seu)
+        this.settings = {
+          ...this.settings,
+          ...(c.maxParallel !== undefined ? { maxParallel: c.maxParallel } : {}),
+          ...(c.maxScreenSessions !== undefined ? { maxScreenSessions: c.maxScreenSessions } : {}),
         }
+        await writeJsonAtomic(this.p.settings, this.settings)
+        const msgs: string[] = []
+        if (c.maxParallel !== undefined) {
+          msgs.push(c.maxParallel ? `Máximo de ${c.maxParallel} caso(s) ao mesmo tempo (os que já estão rodando continuam)` : "Sem limite de casos ao mesmo tempo")
+        }
+        if (c.maxScreenSessions !== undefined) {
+          msgs.push(c.maxScreenSessions ? `Até ${c.maxScreenSessions} celular(es) com tela ao vivo ao mesmo tempo` : "Tela ao vivo desligada")
+        }
+        return { ok: true, message: msgs.join(" · ") || "Nada alterado" }
       }
       case "set_queue_wait_factor": {
         const q = this.queues.get(c.queueId)

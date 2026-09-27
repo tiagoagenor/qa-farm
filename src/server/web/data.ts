@@ -58,7 +58,7 @@ export async function readMachines() {
     fsp.readFile(path.join(p.state, "ssh", "qafarm_ed25519.pub"), "utf8").catch(() => ""),
   ])
   const byId = new Map((status?.machines ?? []).map((s) => [s.id, s]))
-  const settings = await readJson(p.settings, SettingsSchema, { maxParallel: 0 })
+  const settings = await readJson(p.settings, SettingsSchema, { maxParallel: 0, maxScreenSessions: 3 })
   return {
     master: { id: cfg.machineId },
     settings,

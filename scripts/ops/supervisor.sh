@@ -2,7 +2,7 @@
 # supervisor.sh — mantém o painel (web) e o runner do QA Farm vivos. Sem sudo: roda pelo crontab do usuário.
 #
 #   scripts/ops/supervisor.sh start     # sobe o que estiver parado (é o que o cron chama a cada minuto)
-#   scripts/ops/supervisor.sh stop      # para web e runner (os celulares continuam ligados)
+#   scripts/ops/supervisor.sh stop      # para web, runner e tela ao vivo (os celulares continuam ligados)
 #   scripts/ops/supervisor.sh restart
 #   scripts/ops/supervisor.sh status
 set -uo pipefail
@@ -71,6 +71,14 @@ start_runner() {
   echo $! > "$RUN/runner.pid"
 }
 
+start_screen() { # tela ao vivo (scrcpy no painel); se cair, o resto do painel segue igual
+  alive "$RUN/screen.pid" "screen.mjs" && return 0
+  [ -f "$REPO/dist/screen.mjs" ] || return 0
+  log "subindo serviço de tela na porta ${QAFARM_SCREEN_PORT:-3001}"
+  setsid nohup node "$REPO/dist/screen.mjs" >> "$LOGS/screen.log" 2>&1 < /dev/null &
+  echo $! > "$RUN/screen.pid"
+}
+
 stop_one() { # $1 = pidfile
   local pid; pid=$(cat "$1" 2>/dev/null) || return 0
   [ -n "$pid" ] || return 0
@@ -83,12 +91,13 @@ stop_one() { # $1 = pidfile
 status() {
   alive "$RUN/web.pid" "next-server|next start" && echo "web:    rodando (pid $(cat "$RUN/web.pid"), porta $PORT)" || echo "web:    parado"
   alive "$RUN/runner.pid" "runner.mjs" && echo "runner: rodando (pid $(cat "$RUN/runner.pid"), heartbeat há $(runner_heartbeat_age)s)" || echo "runner: parado"
+  alive "$RUN/screen.pid" "screen.mjs" && echo "tela:   rodando (pid $(cat "$RUN/screen.pid"), porta ${QAFARM_SCREEN_PORT:-3001})" || echo "tela:   parado"
 }
 
 case "${1:-start}" in
-  start) rotate_logs; start_web; start_runner ;;
-  stop) stop_one "$RUN/runner.pid"; stop_one "$RUN/web.pid"; log "parado" ;;
-  restart) stop_one "$RUN/runner.pid"; stop_one "$RUN/web.pid"; start_web; start_runner; log "reiniciado" ;;
+  start) rotate_logs; start_web; start_runner; start_screen ;;
+  stop) stop_one "$RUN/screen.pid"; stop_one "$RUN/runner.pid"; stop_one "$RUN/web.pid"; log "parado" ;;
+  restart) stop_one "$RUN/screen.pid"; stop_one "$RUN/runner.pid"; stop_one "$RUN/web.pid"; start_web; start_runner; start_screen; log "reiniciado" ;;
   status) status ;;
   *) echo "Uso: $0 start|stop|restart|status" >&2; exit 1 ;;
 esac

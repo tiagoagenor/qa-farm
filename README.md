@@ -80,6 +80,24 @@ nuvem; com ela fora do ar, esses casos esperam. O "Instalar / atualizar agente" 
 mesmo Python). Se o mestre sumir por 90 s, o worker encerra o robot órfão; se o worker cair no meio do caso, o caso
 vira erro de infraestrutura e volta para a fila.
 
+## Celulares: tela ao vivo (scrcpy no painel)
+
+Em **Celulares**, o botão **Ao vivo** abre a tela do celular em tempo real no navegador (qualquer pessoa logada):
+dá para acompanhar um teste rodando ou, ligando **Controlar**, tocar, arrastar e usar Voltar/Início/Apps. Só uma
+pessoa controla cada celular por vez; as outras assistem. Com um teste rodando, o painel avisa antes de controlar.
+
+- **Limite:** no máximo **3 celulares ao vivo ao mesmo tempo** (configurável em **Máquinas → Celulares ao vivo ao
+  mesmo tempo**; 0 desliga). Várias pessoas no mesmo celular contam como 1. A tela fecha sozinha com a aba escondida
+  por 30 s, após 10 min sem uso ou 30 min no total.
+- **Como funciona:** serviço próprio (`dist/screen.mjs`, porta **3001**, supervisionado pelo cron como web e runner)
+  que envia o `scrcpy-server` v3.3.3 oficial (`vendor/scrcpy`, SHA-256 conferido) ao celular pelo adb e repassa o
+  vídeo H.264 por WebSocket; o navegador decodifica em WebAssembly (funciona em http na rede local). Celulares de
+  worker passam pelo túnel SSH (adb server do worker na porta local `20000 + 100·slot + 90`).
+- **Sem efeito nos testes:** sem áudio/clipboard, 800 px, 2 Mbit/s, 24 fps; acorda a tela ao abrir e, ao fechar,
+  apaga de novo só se for emulador sem teste rodando; o arquivo do scrcpy é removido do celular. Se o serviço de tela
+  cair, o resto do painel segue igual (o botão "Ver tela", por print, continua).
+- WebSocket só aceita quem está logado no painel e vindo da página do painel (mesmo host, porta 3000).
+
 ## Projeto: atualizar o código do Robot pelo painel
 
 **Página Projeto** (`/projeto`): branch e commit atuais do projeto Robot no servidor, commits recentes e se está

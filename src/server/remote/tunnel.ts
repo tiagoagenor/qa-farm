@@ -1,9 +1,10 @@
 import { type ChildProcess, spawn } from "node:child_process"
 
-import { AGENT_PORT, localPorts } from "@/core/machines"
+import { ADB_SERVER_PORT, AGENT_PORT, localPorts } from "@/core/machines"
 
 // Túnel SSH aberto pelo MESTRE até o worker: leva o agente (7100) e os Appiums (4800+g) para portas locais
-// do mestre (20000+100·slot …). Nenhuma porta nova fica exposta na rede do worker.
+// do mestre (20000+100·slot …), e o adb server do worker (tela ao vivo). Nenhuma porta nova fica exposta na
+// rede do worker.
 
 export interface TunnelSpec {
   host: string
@@ -35,6 +36,7 @@ export class Tunnel {
     const p = localPorts(this.spec.slot)
     const fw = ["-L", `127.0.0.1:${p.agent}:127.0.0.1:${AGENT_PORT}`]
     for (let g = 1; g <= this.spec.groups; g++) fw.push("-L", `127.0.0.1:${p.appium(g)}:127.0.0.1:${this.spec.appiumBasePort + g}`)
+    fw.push("-L", `127.0.0.1:${p.adb}:127.0.0.1:${ADB_SERVER_PORT}`)
     return [
       "-N",
       "-i",

@@ -1,6 +1,6 @@
 "use client"
 
-import { Camera, ChevronDown, MoreVertical, Power, RefreshCw, RotateCw } from "lucide-react"
+import { Camera, ChevronDown, MonitorPlay, MoreVertical, Power, RefreshCw, RotateCw } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
 
@@ -36,6 +36,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { sendCommand } from "@/lib/client"
 import { DEVICE_STATE } from "@/lib/format"
 import { MACHINE_STATE, type MachineRow, type MachinesDto } from "@/components/machines/machine-admin"
+
+import { LiveScreenDialog, type ScreenInfo } from "./live-screen"
 
 interface DevicesDto {
   updatedAt: string | null
@@ -168,6 +170,9 @@ export function DeviceGrid() {
   }>("/api/machines/metrics", 5000)
   const [count, setCount] = useState("15")
   const [screen, setScreen] = useState<string | null>(null)
+  const [live, setLive] = useState<string | null>(null)
+  const { data: screenInfo } = usePoll<ScreenInfo>("/api/screen", 10_000)
+  const liveOn = !!screenInfo?.alive && screenInfo.max > 0
   const [busy, setBusy] = useState(false)
   const devices = data?.devices ?? []
   const emulators = devices.filter((d) => d.kind === "emulator")
@@ -274,9 +279,16 @@ export function DeviceGrid() {
         )}
         {d.note && <p className="text-muted-foreground">{d.note}</p>}
         {d.adbState === "device" && (
-          <Button variant="outline" size="sm" className="w-fit" onClick={() => setScreen(d.serial)}>
-            <Camera /> Ver tela
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" className="w-fit" onClick={() => setScreen(d.serial)}>
+              <Camera /> Ver tela
+            </Button>
+            {liveOn && d.kind !== "cloud" && (
+              <Button variant="outline" size="sm" className="w-fit" onClick={() => setLive(d.serial)} data-testid="device-live">
+                <MonitorPlay /> Ao vivo
+              </Button>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>
@@ -420,6 +432,7 @@ export function DeviceGrid() {
         </CollapsibleContent>
       </Collapsible>
       <ScreenDialog serial={screen} onClose={() => setScreen(null)} />
+      <LiveScreenDialog serial={live} onClose={() => setLive(null)} />
     </div>
   )
 }

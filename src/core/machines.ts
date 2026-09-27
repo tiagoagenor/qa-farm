@@ -86,11 +86,14 @@ export function splitIndex(index: number): { slot: number; local: number } {
   return { slot: Math.floor(index / SLOT_BASE), local: index % SLOT_BASE }
 }
 
-/** Portas no MESTRE (lado local do túnel): agente e Appiums do grupo g (1, 2, …). */
-export function localPorts(slot: number): { agent: number; appium: (group: number) => number } {
+/** Portas no MESTRE (lado local do túnel): agente, Appiums do grupo g (1, 2, …) e o adb server do worker. */
+export function localPorts(slot: number): { agent: number; appium: (group: number) => number; adb: number } {
   const base = 20_000 + 100 * slot
-  return { agent: base, appium: (g) => base + g }
+  return { agent: base, appium: (g) => base + g, adb: base + 90 }
 }
+
+/** Porta do adb server nas máquinas (mestre e workers). */
+export const ADB_SERVER_PORT = 5037
 
 export function appiumGroups(maxDevices: number, perGroup: number): number {
   return Math.max(1, Math.ceil(maxDevices / Math.max(1, perGroup)))
