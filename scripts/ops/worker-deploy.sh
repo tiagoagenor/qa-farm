@@ -11,6 +11,8 @@ W_MAX_DEVICES="${W_MAX_DEVICES:-6}"
 W_COMMIT="${W_COMMIT:-$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo dev)}"
 SSH=(ssh -i "$W_KEY" -p "$W_PORT" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$W_KNOWN_HOSTS")
 DEST="$W_USER@$W_HOST"
+# rsync/scp exigem IPv6 entre colchetes no destino (user@[2804:…]:pasta); o ssh aceita sem
+case "$W_HOST" in *:*) RDEST="$W_USER@[$W_HOST]" ;; *) RDEST="$DEST" ;; esac
 
 [ -f "$REPO/dist/agent.mjs" ] || { echo "Falta dist/agent.mjs (rode o build)" >&2; exit 1; }
 echo "==> preparando ~/qa-farm-agent em $DEST"
@@ -18,11 +20,11 @@ echo "==> preparando ~/qa-farm-agent em $DEST"
 
 echo "==> enviando agente e scripts"
 RSYNC_SSH="ssh -i $W_KEY -p $W_PORT -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$W_KNOWN_HOSTS"
-rsync -a -e "$RSYNC_SSH" "$REPO/dist/agent.mjs" "$DEST:qa-farm-agent/dist/"
-rsync -a -e "$RSYNC_SSH" "$REPO/scripts/farm/" "$DEST:qa-farm-agent/scripts/farm/"
-rsync -a -e "$RSYNC_SSH" "$REPO/scripts/ops/agent-supervisor.sh" "$DEST:qa-farm-agent/scripts/ops/"
+rsync -a -e "$RSYNC_SSH" "$REPO/dist/agent.mjs" "$RDEST:qa-farm-agent/dist/"
+rsync -a -e "$RSYNC_SSH" "$REPO/scripts/farm/" "$RDEST:qa-farm-agent/scripts/farm/"
+rsync -a -e "$RSYNC_SSH" "$REPO/scripts/ops/agent-supervisor.sh" "$RDEST:qa-farm-agent/scripts/ops/"
 # listeners do robot (o robot dos casos pode rodar no worker) — o fake_robot vai junto para o modo simulado
-rsync -a --delete --exclude tests --exclude __pycache__ -e "$RSYNC_SSH" "$REPO/scripts/robot/" "$DEST:qa-farm-agent/scripts/robot/"
+rsync -a --delete --exclude tests --exclude __pycache__ -e "$RSYNC_SSH" "$REPO/scripts/robot/" "$RDEST:qa-farm-agent/scripts/robot/"
 
 echo "==> robot no worker (venv com os mesmos pacotes do mestre, instalado offline — sem sudo)"
 ROBOT_PROJECT="${QAFARM_ROBOT_PROJECT:-$HOME/www/QA_Automacao_APP}"
@@ -32,7 +34,7 @@ elif [ -x "$ROBOT_PROJECT/.venv/bin/pip" ]; then
   WHEELS="$(mktemp -d)"
   "$ROBOT_PROJECT/.venv/bin/pip" freeze > "$WHEELS/freeze.txt"
   "$ROBOT_PROJECT/.venv/bin/pip" download -q -r "$WHEELS/freeze.txt" pip -d "$WHEELS"
-  rsync -a --delete -e "$RSYNC_SSH" "$WHEELS/" "$DEST:qa-farm-agent/robot-wheels/"
+  rsync -a --delete -e "$RSYNC_SSH" "$WHEELS/" "$RDEST:qa-farm-agent/robot-wheels/"
   rm -rf "$WHEELS"
   "${SSH[@]}" "$DEST" 'set -e; cd ~/qa-farm-agent; rm -rf robot-venv; python3 -m venv --without-pip robot-venv
     robot-venv/bin/python "$(ls robot-wheels/pip-*.whl | head -1)/pip" install -q --no-index --find-links robot-wheels pip
