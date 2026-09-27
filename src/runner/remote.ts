@@ -45,6 +45,8 @@ interface Runtime {
   m: Machine
   client: AgentClient | null
   tunnel: Tunnel | null
+  /** proxy de saída do worker pelo mestre (casos do BrowserStack) */
+  proxy: Tunnel | null
   state: MachineState
   lastSeenAt?: number
   lastError?: string
@@ -103,6 +105,9 @@ export class RemoteMachines {
         const spec = this.tunnelSpec(m)
         if (cur.tunnel) cur.tunnel.update(spec)
         else cur.tunnel = new Tunnel(spec, this.log)
+        const pspec = this.tunnelSpec(m, "proxy")
+        if (cur.proxy) cur.proxy.update(pspec)
+        else cur.proxy = new Tunnel(pspec, this.log)
       }
       return cur
     }
@@ -110,6 +115,7 @@ export class RemoteMachines {
       m,
       client,
       tunnel: m.transport === "ssh" ? new Tunnel(this.tunnelSpec(m), this.log) : null,
+      proxy: m.transport === "ssh" ? new Tunnel(this.tunnelSpec(m, "proxy"), this.log) : null,
       state: m.enabled ? "connecting" : "disabled",
       desired: desired ?? 0,
       ops: [],
@@ -125,8 +131,9 @@ export class RemoteMachines {
     return r
   }
 
-  private tunnelSpec(m: Machine) {
+  private tunnelSpec(m: Machine, mode: "forward" | "proxy" = "forward") {
     return {
+      mode,
       host: m.host,
       user: m.sshUser,
       port: m.sshPort,
@@ -169,12 +176,23 @@ export class RemoteMachines {
   /** Máquina apta a receber casos novos agora. */
   isOnline(id: string): boolean {
     const r = this.rt.get(id)
-    return !!r && r.state === "online" && !r.draining && r.lastSeenAt !== undefined && Date.now() - r.lastSeenAt < HEARTBEAT_STALE_MS
+    return (
+      !!r &&
+      r.state === "online" &&
+      !r.draining &&
+      r.lastSeenAt !== undefined &&
+      Date.now() - r.lastSeenAt < HEARTBEAT_STALE_MS
+    )
   }
   /** Máquina respondendo (inclusive drenando): seus celulares continuam válidos. */
   isReachable(id: string): boolean {
     const r = this.rt.get(id)
-    return !!r && (r.state === "online" || r.state === "degraded" || r.draining) && r.lastSeenAt !== undefined && Date.now() - r.lastSeenAt < this.cfg.remoteOfflineMs
+    return (
+      !!r &&
+      (r.state === "online" || r.state === "degraded" || r.draining) &&
+      r.lastSeenAt !== undefined &&
+      Date.now() - r.lastSeenAt < this.cfg.remoteOfflineMs
+    )
   }
   /** Robot dos celulares desta máquina roda nela agora: opção ligada, venv instalado e máquina online. */
   runsRobot(id: string): boolean {
@@ -183,6 +201,14 @@ export class RemoteMachines {
   /** Worker online e com o robot instalado (ex.: para os casos do BrowserStack). */
   canRunRobot(id: string): boolean {
     return this.robotReady(id) && this.isOnline(id)
+  }
+  /** Worker sai para a internet pelo mestre? (máquina de teste sem SSH: acesso direto, sem proxy) */
+  proxyUp(id: string): boolean {
+    const r = this.rt.get(id)
+    return !!r && (r.m.transport === "direct" || !!r.proxy?.running)
+  }
+  usesProxy(id: string): boolean {
+    return this.rt.get(id)?.m.transport === "ssh"
   }
   robotReady(id: string): boolean {
     return !!this.rt.get(id)?.lastState?.robot?.ready
@@ -241,18 +267,22 @@ export class RemoteMachines {
       r.state = "disabled"
       r.tunnel?.stop()
       r.tunnel = null
+      r.proxy?.stop()
+      r.proxy = null
       return
     }
     r.polling = true
     try {
       if (r.m.transport === "ssh") {
         if (!r.tunnel) r.tunnel = new Tunnel(this.tunnelSpec(r.m), this.log)
+        if (!r.proxy) r.proxy = new Tunnel(this.tunnelSpec(r.m, "proxy"), this.log)
         if (!fs.existsSync(this.keyFile)) {
           r.state = "pending"
           r.lastError = "chave SSH do mestre ainda não foi criada"
           return
         }
         r.tunnel.ensure()
+        r.proxy.ensure()
       }
       if (!r.client) return
       if (!r.agentHealth || r.state !== "online") {
@@ -281,7 +311,12 @@ export class RemoteMachines {
       r.lastError = (e as Error).message
       if (r.tunnel && r.tunnel.state !== "up") r.lastError = r.tunnel.lastError || r.lastError
       const age = r.lastSeenAt === undefined ? Infinity : Date.now() - r.lastSeenAt
-      r.state = age < this.cfg.remoteOfflineMs && r.lastSeenAt !== undefined ? "degraded" : r.lastSeenAt === undefined ? "connecting" : "offline"
+      r.state =
+        age < this.cfg.remoteOfflineMs && r.lastSeenAt !== undefined
+          ? "degraded"
+          : r.lastSeenAt === undefined
+            ? "connecting"
+            : "offline"
       if (r.state === "offline") r.agentHealth = undefined
     } finally {
       r.polling = false
@@ -294,7 +329,13 @@ export class RemoteMachines {
     const was = r.health?.brake ?? false
     r.healthState = h.state
     r.health = h
-    if (h.brake && !was) this.log(`${r.m.id}: saúde crítica (${h.alerts.filter((a) => a.level === "crit").map((a) => a.message).join("; ")}): novos casos aguardam`)
+    if (h.brake && !was)
+      this.log(
+        `${r.m.id}: saúde crítica (${h.alerts
+          .filter((a) => a.level === "crit")
+          .map((a) => a.message)
+          .join("; ")}): novos casos aguardam`,
+      )
     if (!h.brake && was) this.log(`${r.m.id}: saúde normalizada`)
   }
 
@@ -313,13 +354,18 @@ export class RemoteMachines {
   }
 
   /** Emuladores faltando para o desejado da máquina → pede "ligar". */
-  reconcileDesired(presentLocalIndexes: (id: string) => Set<number>, inMaintenance: (id: string, local: number) => boolean): void {
+  reconcileDesired(
+    presentLocalIndexes: (id: string) => Set<number>,
+    inMaintenance: (id: string, local: number) => boolean,
+  ): void {
     for (const r of this.rt.values()) {
       if (r.desired <= 0 || !this.isOnline(r.m.id) || r.currentOp || r.ops.length) continue
       if (r.health?.blockStart) continue
       if (Date.now() - r.lastDesiredAttempt < DESIRED_RETRY_MS) continue
       const present = presentLocalIndexes(r.m.id)
-      const missing = Array.from({ length: r.desired }, (_, k) => k + 1).filter((i) => !present.has(i) && !inMaintenance(r.m.id, i))
+      const missing = Array.from({ length: r.desired }, (_, k) => k + 1).filter(
+        (i) => !present.has(i) && !inMaintenance(r.m.id, i),
+      )
       if (!missing.length) continue
       r.lastDesiredAttempt = Date.now()
       this.log(`${r.m.id}: faltam celulares ${missing.join(",")} (desejado ${r.desired}) → ligando`)
@@ -333,7 +379,9 @@ export class RemoteMachines {
     if (r.currentOp) {
       const st = await r.client.farmOpStatus(r.currentOp.opId).catch(() => null)
       if (st && st.state !== "running") {
-        this.log(`${r.m.id}: fazenda: ${r.currentOp.command} → ${st.state === "ok" ? "ok" : `código ${st.code}`}`)
+        this.log(
+          `${r.m.id}: fazenda: ${r.currentOp.command} → ${st.state === "ok" ? "ok" : `código ${st.code}`}`,
+        )
         this.onOpDone(r.m.id, r.currentOp.op)
         r.currentOp = undefined
       }
@@ -357,7 +405,17 @@ export class RemoteMachines {
   async ensureKey(): Promise<string> {
     await fsp.mkdir(this.sshDir, { recursive: true, mode: 0o700 })
     if (!fs.existsSync(this.keyFile)) {
-      await exec("ssh-keygen", ["-t", "ed25519", "-N", "", "-C", `qa-farm@${this.cfg.machineId}`, "-f", this.keyFile, "-q"])
+      await exec("ssh-keygen", [
+        "-t",
+        "ed25519",
+        "-N",
+        "",
+        "-C",
+        `qa-farm@${this.cfg.machineId}`,
+        "-f",
+        this.keyFile,
+        "-q",
+      ])
     }
     return (await fsp.readFile(`${this.keyFile}.pub`, "utf8")).trim()
   }
@@ -381,7 +439,8 @@ export class RemoteMachines {
     directUrl?: string
     token?: string
   }): Promise<Machine> {
-    if (this.rt.has(input.id) || input.id === this.cfg.machineId) throw new Error(`Já existe uma máquina "${input.id}"`)
+    if (this.rt.has(input.id) || input.id === this.cfg.machineId)
+      throw new Error(`Já existe uma máquina "${input.id}"`)
     const slot = nextSlot(this.machines().map((m) => m.slot))
     if (slot === null) throw new Error("Limite de máquinas atingido")
     if (!input.directUrl) await this.ensureKey()
@@ -405,7 +464,10 @@ export class RemoteMachines {
     return m
   }
 
-  async update(id: string, patch: Partial<Pick<Machine, "name" | "host" | "sshUser" | "sshPort" | "maxDevices">>): Promise<Machine> {
+  async update(
+    id: string,
+    patch: Partial<Pick<Machine, "name" | "host" | "sshUser" | "sshPort" | "maxDevices">>,
+  ): Promise<Machine> {
     const r = this.rt.get(id)
     if (!r) throw new Error("Máquina não encontrada")
     this.upsertRuntime({ ...r.m, ...patch })
@@ -442,6 +504,7 @@ export class RemoteMachines {
     const r = this.rt.get(id)
     if (!r) throw new Error("Máquina não encontrada")
     r.tunnel?.stop()
+    r.proxy?.stop()
     this.rt.delete(id)
     await this.save()
   }
@@ -481,20 +544,37 @@ export class RemoteMachines {
       ).catch((e: { stderr?: string; message: string }) => ({ stdout: "", stderr: e.stderr || e.message }))
       if (!ssh.stdout.includes("ok")) {
         const why = String(ssh.stderr).trim().split("\n").pop() ?? ""
-        return { ok: false, message: `SSH falhou: ${why}. Cole a chave pública do mestre no ~/.ssh/authorized_keys de ${r.m.sshUser}@${r.m.host}.` }
+        return {
+          ok: false,
+          message: `SSH falhou: ${why}. Cole a chave pública do mestre no ~/.ssh/authorized_keys de ${r.m.sshUser}@${r.m.host}.`,
+        }
       }
     }
     try {
       const h = await r.client!.health()
-      if (h.protocol !== AGENT_PROTOCOL) return { ok: false, message: `SSH ok · agente com protocolo ${h.protocol} ≠ ${AGENT_PROTOCOL}: atualize o agente` }
-      return { ok: true, message: `SSH ok · agente ${h.agentVersion} (${h.commit}) em ${h.hostname} · protocolo ok` }
+      if (h.protocol !== AGENT_PROTOCOL)
+        return {
+          ok: false,
+          message: `SSH ok · agente com protocolo ${h.protocol} ≠ ${AGENT_PROTOCOL}: atualize o agente`,
+        }
+      return {
+        ok: true,
+        message: `SSH ok · agente ${h.agentVersion} (${h.commit}) em ${h.hostname} · protocolo ok`,
+      }
     } catch (e) {
-      return { ok: false, message: `SSH ok · agente sem resposta (${(e as Error).message}). Use "Instalar agente".` }
+      return {
+        ok: false,
+        message: `SSH ok · agente sem resposta (${(e as Error).message}). Use "Instalar agente".`,
+      }
     }
   }
 
   /** Instala/atualiza o agente no worker (em segundo plano). */
-  deploy(id: string, repoRoot: string, done: (ok: boolean, output: string) => void): { ok: boolean; message: string } {
+  deploy(
+    id: string,
+    repoRoot: string,
+    done: (ok: boolean, output: string) => void,
+  ): { ok: boolean; message: string } {
     const r = this.rt.get(id)
     if (!r) return { ok: false, message: "Máquina não encontrada" }
     if (r.m.transport !== "ssh") return { ok: false, message: "Máquina de teste (sem SSH): nada a instalar" }
@@ -521,6 +601,7 @@ export class RemoteMachines {
         r.deploying = false
         r.agentHealth = undefined
         r.tunnel?.restart()
+        r.proxy?.restart()
         done(!err, `${stdout}\n${stderr}`.trim())
       },
     )
@@ -530,7 +611,9 @@ export class RemoteMachines {
   // ------------------------------------------------------------------ saída ---
   status(): MachineStatus[] {
     return [...this.rt.values()].map((r) => {
-      const emus = r.lastState ? parseAdbDevices(r.lastState.adbRaw).filter((d) => d.kind === "emulator").length : 0
+      const emus = r.lastState
+        ? parseAdbDevices(r.lastState.adbRaw).filter((d) => d.kind === "emulator").length
+        : 0
       return {
         id: r.m.id,
         state: r.deploying ? "connecting" : r.state,
@@ -557,16 +640,29 @@ export class RemoteMachines {
       id: r.m.id,
       name: r.m.name,
       role: "worker" as const,
-      sample: r.lastState?.metrics ? { ...r.lastState.metrics, emulatorsRunning: parseAdbDevices(r.lastState.adbRaw).filter((d) => d.kind === "emulator").length } : null,
+      sample: r.lastState?.metrics
+        ? {
+            ...r.lastState.metrics,
+            emulatorsRunning: parseAdbDevices(r.lastState.adbRaw).filter((d) => d.kind === "emulator").length,
+          }
+        : null,
       history: r.history.list(),
       health: r.health
-        ? { level: r.health.level, alerts: r.health.alerts, brake: r.health.brake, blockStart: r.health.blockStart }
+        ? {
+            level: r.health.level,
+            alerts: r.health.alerts,
+            brake: r.health.brake,
+            blockStart: r.health.blockStart,
+          }
         : { level: "ok" as const, alerts: [], brake: false, blockStart: false },
       state: r.state,
     }))
   }
 
   shutdown(): void {
-    for (const r of this.rt.values()) r.tunnel?.stop()
+    for (const r of this.rt.values()) {
+      r.tunnel?.stop()
+      r.proxy?.stop()
+    }
   }
 }

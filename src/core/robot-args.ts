@@ -11,7 +11,8 @@ export function escapeRobotPattern(name: string): string {
  */
 export function parseTimeoutVariables(text: string): Record<string, number> {
   const out: Record<string, number> = {}
-  const re = /^([A-Z0-9_]*(?:TIMEOUT|TEMPO|WAIT)[A-Z0-9_]*)\s*=\s*['"]?\s*([\d.]+)\s*(ms|s|sec|seconds?)?\s*['"]?\s*(?:#.*)?$/gm
+  const re =
+    /^([A-Z0-9_]*(?:TIMEOUT|TEMPO|WAIT)[A-Z0-9_]*)\s*=\s*['"]?\s*([\d.]+)\s*(ms|s|sec|seconds?)?\s*['"]?\s*(?:#.*)?$/gm
   for (const m of text.matchAll(re)) {
     const n = Number(m[2])
     if (!Number.isFinite(n)) continue
@@ -84,6 +85,11 @@ export const ROBOT_ENV_WHITELIST = [
   "QAFARM_BS_KEY",
   "QAFARM_BS_BUILD",
   "QAFARM_BS_SESSION",
+  // robot do BrowserStack num worker sai para a internet pelo mestre (proxy SOCKS do túnel)
+  "HTTPS_PROXY",
+  "https_proxy",
+  "NO_PROXY",
+  "no_proxy",
 ] as const
 
 /** Monta o ambiente do processo `robot` só com variáveis permitidas (nada de segredos do painel). */

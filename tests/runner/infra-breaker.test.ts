@@ -24,12 +24,14 @@ describe("disjuntor no runner", () => {
         .items.flatMap((i) => i.attempts)
     await h.tickUntil(() => h!.logs.some((l) => l.includes("pausado por 5 min")) || undefined, 30_000)
 
-    // Act
-    for (let i = 0; i < 30; i++) await h.runner.tick() // o celular continua pronto, mas pausado
-    await new Promise((r) => setTimeout(r, 300))
+    // Act: o celular continua pronto, mas pausado (a nota aparece no próximo ciclo de leitura dos celulares)
+    const dev = await h.tickUntil(() => {
+      const d = h!.runner.snapshotForTests().devices.find((x) => x.serial === "emulator-5554")
+      return d?.note?.startsWith("Pausado") ? d : undefined
+    }, 30_000)
+    for (let i = 0; i < 30; i++) await h.runner.tick()
 
     // Assert
-    const dev = h.runner.snapshotForTests().devices.find((d) => d.serial === "emulator-5554")
     expect([
       attempts().filter((a) => a.status !== "running").length,
       attempts().some((a) => a.status === "running"),

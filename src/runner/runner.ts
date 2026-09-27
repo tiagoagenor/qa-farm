@@ -8,8 +8,28 @@ import { RUN_OUT, RUN_REPO } from "@/core/agent-protocol"
 import { type GitOp, maskSecrets, type ProjectGitState } from "@/core/project-git"
 import type { Config } from "@/core/config"
 import { newId } from "@/core/ids"
-import { deviceKey, dispatchBudget, globalIndex, interleaveByMachine, parseDeviceKey, splitIndex } from "@/core/machines"
-import { BS_APP_MAX_AGE_MS, BS_MACHINE_ID, BsAppsSchema, bsBudget, type BsPlan, type BsState, BsStateSchema, nextSlotId, slotIdFromKey, slotIndex, slotKey } from "@/core/browserstack"
+import {
+  deviceKey,
+  dispatchBudget,
+  globalIndex,
+  interleaveByMachine,
+  parseDeviceKey,
+  splitIndex,
+  WORKER_PROXY_URL,
+} from "@/core/machines"
+import {
+  BS_APP_MAX_AGE_MS,
+  BS_MACHINE_ID,
+  BsAppsSchema,
+  bsBudget,
+  type BsPlan,
+  type BsState,
+  BsStateSchema,
+  nextSlotId,
+  slotIdFromKey,
+  slotIndex,
+  slotKey,
+} from "@/core/browserstack"
 import { InfraBreaker } from "@/core/infra-breaker"
 import { evaluateHealth, type HealthResult, type HealthState } from "@/core/health"
 import { type HostSample, MetricsFileSchema, MetricsHistory } from "@/core/metrics"
@@ -17,7 +37,15 @@ import { parseMassa } from "@/core/massa"
 import { nextPhysicalIndex, parseAdbDevices, serialFromIndex } from "@/core/parsers/adb-devices"
 import { classifyRun } from "@/core/parsers/robot-output"
 import { dataPaths } from "@/core/paths"
-import { applyResult, buildQueue, cancelQueue, failedTestIds, finalizeIfDone, reopenItem, setQueueRetries } from "@/core/queue-logic"
+import {
+  applyResult,
+  buildQueue,
+  cancelQueue,
+  failedTestIds,
+  finalizeIfDone,
+  reopenItem,
+  setQueueRetries,
+} from "@/core/queue-logic"
 import { buildRobotArgs, buildRobotEnv, parseTimeoutVariables, scaledTimeoutArgs } from "@/core/robot-args"
 import { type Assignment, schedule } from "@/core/scheduler"
 import { listJsonFiles, readJson, writeJsonAtomic } from "@/core/store"
@@ -99,7 +127,8 @@ const REMOTE_FILE_MAX = 200 * 1024 * 1024
 const WORKSPACE_RETRY_MS = 2 * 60_000
 const INSTALL_RETRY_MS = 3 * 60_000
 /** Janelas de erro do Android que bloqueiam a tela (ANR / app parou). */
-export const ERROR_DIALOG_RE = /Application Not Responding|Application Error|isn.t responding|has stopped|keeps stopping/i
+export const ERROR_DIALOG_RE =
+  /Application Not Responding|Application Error|isn.t responding|has stopped|keeps stopping/i
 const DESIRED_RETRY_MS = 5 * 60_000
 
 export class Runner {
@@ -197,7 +226,9 @@ export class Runner {
     for (const k of [...this.appVersions.keys()]) if (k.startsWith(prefix)) this.appVersions.delete(k)
     for (const k of [...this.prepared]) if (k.startsWith(prefix)) this.prepared.delete(k)
     const m = this.remote.get(id)
-    if (m) for (const i of [...this.maintenance.keys()]) if (splitIndex(i).slot === m.slot) this.maintenance.delete(i)
+    if (m)
+      for (const i of [...this.maintenance.keys()])
+        if (splitIndex(i).slot === m.slot) this.maintenance.delete(i)
   }
 
   private async saveDesired(): Promise<void> {
@@ -206,7 +237,15 @@ export class Runner {
 
   // ------------------------------------------------------------ início ---
   async init(): Promise<void> {
-    for (const d of [this.p.apps, this.p.queues, this.p.runs, this.p.commands, this.p.commandsDone, this.p.state, this.p.logs]) {
+    for (const d of [
+      this.p.apps,
+      this.p.queues,
+      this.p.runs,
+      this.p.commands,
+      this.p.commandsDone,
+      this.p.state,
+      this.p.logs,
+    ]) {
       await fsp.mkdir(d, { recursive: true })
     }
     // 1) mata processos robot que sobraram do runner anterior
@@ -227,7 +266,9 @@ export class Runner {
         if (it.status !== "running") continue
         const a = it.attempts.at(-1)
         // a tentativa terminou (result.json gravado) mas a fila não foi atualizada: aplica o resultado
-        const res = a ? await readJson(path.join(this.p.runs, a.dir, "result.json"), RunResultSchema.nullable(), null) : null
+        const res = a
+          ? await readJson(path.join(this.p.runs, a.dir, "result.json"), RunResultSchema.nullable(), null)
+          : null
         if (a && res) {
           q = applyResult(q, it.id, a.n, res, await this.resultTime(a.dir, res))
           continue
@@ -242,7 +283,13 @@ export class Runner {
                   status: q!.status === "canceled" ? ("canceled" as const) : ("queued" as const),
                   attempts: x.attempts.map((t) =>
                     t.status === "running"
-                      ? { ...t, status: "infra_error" as const, endedAt: now, message: "Runner reiniciado durante o caso", pgid: undefined }
+                      ? {
+                          ...t,
+                          status: "infra_error" as const,
+                          endedAt: now,
+                          message: "Runner reiniciado durante o caso",
+                          pgid: undefined,
+                        }
                       : t,
                   ),
                 },
@@ -257,14 +304,22 @@ export class Runner {
     this.desired = desired.devices
     await this.remote.load(desired.machines ?? {})
     // chave SSH dedicada do mestre (a página Máquinas mostra a pública para colar no worker)
-    await this.remote.ensureKey().catch((e: Error) => this.log(`não consegui criar a chave SSH do mestre: ${e.message}`))
-    this.physical = new Map(Object.entries((await readJson(this.p.physical, PhysicalStateSchema, { enabled: {} })).enabled))
-    this.disabledEmulators = new Set((await readJson(this.p.emulatorsDisabled, EmulatorsDisabledSchema, { disabled: [] })).disabled)
+    await this.remote
+      .ensureKey()
+      .catch((e: Error) => this.log(`não consegui criar a chave SSH do mestre: ${e.message}`))
+    this.physical = new Map(
+      Object.entries((await readJson(this.p.physical, PhysicalStateSchema, { enabled: {} })).enabled),
+    )
+    this.disabledEmulators = new Set(
+      (await readJson(this.p.emulatorsDisabled, EmulatorsDisabledSchema, { disabled: [] })).disabled,
+    )
     this.settings = await readJson(this.p.settings, SettingsSchema, { maxParallel: 0, maxScreenSessions: 3 })
     this.bs = await readJson(this.p.browserstack, BsStateSchema, { enabled: false, slots: [] })
     this.bsApps = (await readJson(this.p.browserstackApps, BsAppsSchema, { apps: {} })).apps
     const saved = await readJson(this.p.metrics, MetricsFileSchema.nullable(), null)
-    this.metricsHistory = new MetricsHistory(saved?.machines.find((m) => m.id === this.cfg.machineId)?.history ?? [])
+    this.metricsHistory = new MetricsHistory(
+      saved?.machines.find((m) => m.id === this.cfg.machineId)?.history ?? [],
+    )
     this.catalog = await readJson(this.p.catalog, CatalogSchema.nullable(), null)
     this.catalogStatus = this.catalog ? "ready" : "missing"
     await this.pickActiveApp()
@@ -325,7 +380,10 @@ export class Runner {
       if (now - this.bsDevicesAt > 6 * 3600_000) {
         try {
           const list = (await bs.devices()).filter((d) => d.os === "android")
-          await writeJsonAtomic(path.join(this.p.state, "browserstack-devices.json"), { updatedAt: new Date().toISOString(), devices: list })
+          await writeJsonAtomic(path.join(this.p.state, "browserstack-devices.json"), {
+            updatedAt: new Date().toISOString(),
+            devices: list,
+          })
           this.bsDevicesAt = now
         } catch {
           /* tenta de novo no próximo ciclo */
@@ -366,12 +424,25 @@ export class Runner {
       const ra = busyBySerial.get(serial)
       if (ra) {
         const it = this.queues.get(ra.queueId)?.items.find((i) => i.id === ra.itemId)
-        return { ...base, state: "busy", currentQueueId: ra.queueId, currentItemId: ra.itemId, currentTestName: it?.name, appVersionCode: meta?.versionCode }
+        return {
+          ...base,
+          state: "busy",
+          currentQueueId: ra.queueId,
+          currentItemId: ra.itemId,
+          currentTestName: it?.name,
+          appVersionCode: meta?.versionCode,
+        }
       }
-      if (!bs.configured) return { ...base, note: "Credenciais do BrowserStack não configuradas no .env do painel" }
+      if (!bs.configured)
+        return { ...base, note: "Credenciais do BrowserStack não configuradas no .env do painel" }
       if (!this.bs.enabled) return { ...base, note: "BrowserStack desligado" }
       if (this.bsError) return { ...base, note: `BrowserStack: ${this.bsError}` }
-      if (meta && !fresh) return { ...base, state: "installing", note: `Enviando ${meta.versionName} (${meta.versionCode}) ao BrowserStack` }
+      if (meta && !fresh)
+        return {
+          ...base,
+          state: "installing",
+          note: `Enviando ${meta.versionName} (${meta.versionCode}) ao BrowserStack`,
+        }
       return { ...base, state: "ready", appVersionCode: meta?.versionCode }
     })
   }
@@ -415,14 +486,26 @@ export class Runner {
   }
 
   /** Fim do caso no BrowserStack: marca passou/falhou, encerra sessão órfã e devolve o link do vídeo/logs. */
-  private async finishBsSession(ra: RunningAttempt, status: string, message?: string): Promise<string | undefined> {
-    const s = await readJson(path.join(ra.dir, "session.json"), z.object({ sessionId: z.string().nullable().optional() }).nullable(), null)
+  private async finishBsSession(
+    ra: RunningAttempt,
+    status: string,
+    message?: string,
+  ): Promise<string | undefined> {
+    const s = await readJson(
+      path.join(ra.dir, "session.json"),
+      z.object({ sessionId: z.string().nullable().optional() }).nullable(),
+      null,
+    )
     const id = s?.sessionId
     if (!id) return undefined
     const bs = this.ad.browserstack
     try {
       if (ra.timedOut || ra.canceled || ra.deviceLost) await bs.deleteSession(id)
-      await bs.setSessionStatus(id, status === "passed" ? "passed" : "failed", status === "passed" ? "" : (message ?? status).split("\n")[0])
+      await bs.setSessionStatus(
+        id,
+        status === "passed" ? "passed" : "failed",
+        status === "passed" ? "" : (message ?? status).split("\n")[0],
+      )
       return (await bs.session(id)).publicUrl
     } catch (e) {
       this.log(`BrowserStack: não consegui fechar a sessão ${id}: ${(e as Error).message}`)
@@ -464,7 +547,10 @@ export class Runner {
     if (Date.now() - this.lastStatusWrite < 2000) return
     this.lastStatusWrite = Date.now()
     if (this.remote.machines().length === 0 && !fs.existsSync(this.p.machinesStatus)) return
-    await writeJsonAtomic(this.p.machinesStatus, { updatedAt: new Date().toISOString(), machines: this.remote.status() })
+    await writeJsonAtomic(this.p.machinesStatus, {
+      updatedAt: new Date().toISOString(),
+      machines: this.remote.status(),
+    })
   }
 
   private async writeMetrics(): Promise<void> {
@@ -476,9 +562,16 @@ export class Runner {
           id: this.cfg.machineId,
           name: this.cfg.machineId,
           role: "master",
-          sample: this.lastSample ? { ...this.lastSample, emulatorsRunning: [...this.devices.values()].filter((d) => d.kind === "emulator").length } : null,
+          sample: this.lastSample
+            ? {
+                ...this.lastSample,
+                emulatorsRunning: [...this.devices.values()].filter((d) => d.kind === "emulator").length,
+              }
+            : null,
           history: this.metricsHistory.list(),
-          health: h ? { level: h.level, alerts: h.alerts, brake: h.brake, blockStart: h.blockStart } : { level: "ok", alerts: [], brake: false, blockStart: false },
+          health: h
+            ? { level: h.level, alerts: h.alerts, brake: h.brake, blockStart: h.blockStart }
+            : { level: "ok", alerts: [], brake: false, blockStart: false },
         },
         ...this.remote.metricsEntries(),
       ],
@@ -523,7 +616,9 @@ export class Runner {
       fake: this.cfg.fake,
       activeAppId: this.activeAppId,
       pgids: [...this.running.values()].map((r) => r.pgid).filter((p) => p > 1),
-      remoteRuns: [...this.running.values()].flatMap((r) => (r.remote ? [{ host: r.remote.host, runId: r.remote.runId }] : [])),
+      remoteRuns: [...this.running.values()].flatMap((r) =>
+        r.remote ? [{ host: r.remote.host, runId: r.remote.runId }] : [],
+      ),
       farmJob: this.farmJob,
       catalogStatus: this.catalogStatus,
       catalogError: this.catalogError,
@@ -546,7 +641,11 @@ export class Runner {
    */
   private async pickActiveApp(): Promise<void> {
     const active = [...this.queues.values()]
-      .filter((q) => (q.status === "running" || q.status === "paused") && q.items.some((i) => i.status === "queued" || i.status === "running"))
+      .filter(
+        (q) =>
+          (q.status === "running" || q.status === "paused") &&
+          q.items.some((i) => i.status === "queued" || i.status === "running"),
+      )
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]
     if (active) {
       this.activeAppId = active.appId
@@ -593,7 +692,12 @@ export class Runner {
     this.lastGitStatus = Date.now()
     try {
       const snap = await this.withProject(() => this.ad.git.snapshot(this.gitPreview))
-      this.gitState = { ...this.gitState, ...snap, remoteUrl: await this.ad.git.remoteUrl().catch(() => undefined), error: undefined }
+      this.gitState = {
+        ...this.gitState,
+        ...snap,
+        remoteUrl: await this.ad.git.remoteUrl().catch(() => undefined),
+        error: undefined,
+      }
     } catch (e) {
       this.gitState = { ...this.gitState, error: (e as Error).message }
     } finally {
@@ -608,15 +712,27 @@ export class Runner {
     const state: ProjectGitState = {
       ...this.gitState,
       updatedAt: new Date().toISOString(),
-      op: this.gitOp && { ...this.gitOp, message: this.gitOp.message && mask(this.gitOp.message), log: this.gitOp.log.map(mask) },
+      op: this.gitOp && {
+        ...this.gitOp,
+        message: this.gitOp.message && mask(this.gitOp.message),
+        log: this.gitOp.log.map(mask),
+      },
     }
     await writeJsonAtomic(this.p.projectGit, state)
   }
 
   /** Busca (fetch) ou atualiza (troca de branch + fast-forward) em segundo plano; uma por vez. */
   private startGitOp(kind: GitOp["kind"], branch?: string): { ok: boolean; message: string } {
-    if (this.gitOp?.status === "running") return { ok: false, message: "Operação git em andamento; aguarde terminar" }
-    const op: GitOp = { id: newId("git"), kind, branch, status: "running", startedAt: new Date().toISOString(), log: [] }
+    if (this.gitOp?.status === "running")
+      return { ok: false, message: "Operação git em andamento; aguarde terminar" }
+    const op: GitOp = {
+      id: newId("git"),
+      kind,
+      branch,
+      status: "running",
+      startedAt: new Date().toISOString(),
+      log: [],
+    }
     this.gitOp = op
     const log = (l: string) => {
       op.log.push(l)
@@ -650,7 +766,11 @@ export class Runner {
       // código novo → snapshot e catálogo novos (filas em andamento seguem com o snapshot delas)
       if (kind === "update" && ok) void this.refreshCatalog(false)
     })()
-    return { ok: true, message: kind === "fetch" ? "Buscando atualizações do servidor git…" : `Atualizando o projeto para ${branch}…` }
+    return {
+      ok: true,
+      message:
+        kind === "fetch" ? "Buscando atualizações do servidor git…" : `Atualizando o projeto para ${branch}…`,
+    }
   }
 
   // ------------------------------------------------------------- catálogo ---
@@ -673,7 +793,10 @@ export class Runner {
       }
       this.catalogStatus = "ready"
       this.catalogError = undefined
-      const keep = new Set([this.snapshot.hash, ...[...this.queues.values()].map((q) => q.snapshotHash ?? "")])
+      const keep = new Set([
+        this.snapshot.hash,
+        ...[...this.queues.values()].map((q) => q.snapshotHash ?? ""),
+      ])
       await this.ad.snapshots.prune(keep)
     } catch (e) {
       this.catalogStatus = this.catalog ? "ready" : "error"
@@ -710,21 +833,31 @@ export class Runner {
     }
   }
 
-  private async handle(c: Command): Promise<{ ok: boolean; message: string; data?: Record<string, unknown> }> {
+  private async handle(
+    c: Command,
+  ): Promise<{ ok: boolean; message: string; data?: Record<string, unknown> }> {
     switch (c.type) {
       case "create_queue": {
         const meta = await this.appMeta(c.input.appId)
         if (!meta) return { ok: false, message: "App não encontrado" }
         const other = [...this.queues.values()].find(
-          (q) => (q.status === "running" || q.status === "paused") && q.appId !== c.input.appId && q.items.some((i) => i.status === "queued" || i.status === "running"),
+          (q) =>
+            (q.status === "running" || q.status === "paused") &&
+            q.appId !== c.input.appId &&
+            q.items.some((i) => i.status === "queued" || i.status === "running"),
         )
-        if (other) return { ok: false, message: `A fila "${other.name}" usa outro app. Um app por vez: aguarde, cancele ou use o mesmo app.` }
+        if (other)
+          return {
+            ok: false,
+            message: `A fila "${other.name}" usa outro app. Um app por vez: aguarde, cancele ou use o mesmo app.`,
+          }
         if (!this.catalog && this.catalogBuild) await this.catalogBuild // 1ª geração ainda em andamento
         if (!this.catalog) return { ok: false, message: "Catálogo ainda não está pronto" }
         const snap = this.snapshot ?? (this.snapshot = await this.ensureSnapshot())
         const byId = new Map(this.catalog.entries.map((e) => [e.id, e]))
         const { queue, missing } = buildQueue(newId("queue"), c.input, byId, new Date())
-        if (queue.items.length === 0) return { ok: false, message: "Nenhum caso selecionado existe no catálogo atual" }
+        if (queue.items.length === 0)
+          return { ok: false, message: "Nenhum caso selecionado existe no catálogo atual" }
         this.setQueue({ ...queue, snapshotHash: snap.hash })
         await this.pickActiveApp()
         return {
@@ -753,7 +886,10 @@ export class Runner {
           this.kill(ra)
           killed++
         }
-        return { ok: true, message: `Fila cancelada${killed ? ` (${killed} caso(s) em execução interrompido(s))` : ""}` }
+        return {
+          ok: true,
+          message: `Fila cancelada${killed ? ` (${killed} caso(s) em execução interrompido(s))` : ""}`,
+        }
       }
       case "rerun_failed": {
         const q = this.queues.get(c.queueId)
@@ -762,7 +898,17 @@ export class Runner {
         if (ids.length === 0) return { ok: false, message: "Não há falhas para rodar de novo" }
         return this.handle({
           type: "create_queue",
-          input: { name: `${q.name} · re-run falhas`, appId: q.appId, env: q.env, timeoutSec: q.options.timeoutSec, retries: q.options.retries, closeAppAfter: q.options.closeAppAfter, allowSameAccount: q.options.allowSameAccount, waitFactor: q.options.waitFactor, testIds: ids },
+          input: {
+            name: `${q.name} · re-run falhas`,
+            appId: q.appId,
+            env: q.env,
+            timeoutSec: q.options.timeoutSec,
+            retries: q.options.retries,
+            closeAppAfter: q.options.closeAppAfter,
+            allowSameAccount: q.options.allowSameAccount,
+            waitFactor: q.options.waitFactor,
+            testIds: ids,
+          },
         })
       }
       case "set_queue_retries": {
@@ -771,35 +917,59 @@ export class Runner {
         const preview = setQueueRetries(q, c.retries)
         if (preview.reopened > 0) {
           const other = [...this.queues.values()].find(
-            (x) => x.id !== q.id && (x.status === "running" || x.status === "paused") && x.appId !== q.appId && x.items.some((i) => i.status === "queued" || i.status === "running"),
+            (x) =>
+              x.id !== q.id &&
+              (x.status === "running" || x.status === "paused") &&
+              x.appId !== q.appId &&
+              x.items.some((i) => i.status === "queued" || i.status === "running"),
           )
-          if (other) return { ok: false, message: `A fila "${other.name}" usa outro app. Aguarde ou cancele antes de rodar falhas de novo nesta.` }
+          if (other)
+            return {
+              ok: false,
+              message: `A fila "${other.name}" usa outro app. Aguarde ou cancele antes de rodar falhas de novo nesta.`,
+            }
         }
         this.updateQueue(q.id, (cur) => setQueueRetries(cur, c.retries).queue)
         await this.pickActiveApp()
         const parts = [`Tentativas extras: ${c.retries}`]
         if (preview.reopened) parts.push(`${preview.reopened} caso(s) com falha voltaram para a fila`)
         if (preview.reverted) parts.push(`${preview.reverted} nova(s) tentativa(s) cancelada(s)`)
-        return { ok: true, message: parts.join(" · "), data: { reopened: preview.reopened, reverted: preview.reverted } }
+        return {
+          ok: true,
+          message: parts.join(" · "),
+          data: { reopened: preview.reopened, reverted: preview.reverted },
+        }
       }
       case "bs_set_enabled": {
-        if (c.enabled && !this.ad.browserstack.configured) return { ok: false, message: "Configure QAFARM_BS_USER e QAFARM_BS_KEY no .env do painel" }
+        if (c.enabled && !this.ad.browserstack.configured)
+          return { ok: false, message: "Configure QAFARM_BS_USER e QAFARM_BS_KEY no .env do painel" }
         this.bs = { ...this.bs, enabled: c.enabled }
         await writeJsonAtomic(this.p.browserstack, this.bs)
         this.bsPlanAt = 0
         this.lastDeviceRefresh = 0
-        return { ok: true, message: c.enabled ? "BrowserStack ligado: as vagas ativadas recebem casos" : "BrowserStack desligado: os casos em andamento terminam; nenhum novo vai para lá" }
+        return {
+          ok: true,
+          message: c.enabled
+            ? "BrowserStack ligado: as vagas ativadas recebem casos"
+            : "BrowserStack desligado: os casos em andamento terminam; nenhum novo vai para lá",
+        }
       }
       case "bs_add_slot": {
         if (this.bs.slots.length >= 20) return { ok: false, message: "Limite de 20 vagas" }
-        const slot = { id: nextSlotId(this.bs.slots), device: c.device, osVersion: c.osVersion, enabled: true }
+        const slot = {
+          id: nextSlotId(this.bs.slots),
+          device: c.device,
+          osVersion: c.osVersion,
+          enabled: true,
+        }
         this.bs = { ...this.bs, slots: [...this.bs.slots, slot] }
         await writeJsonAtomic(this.p.browserstack, this.bs)
         this.lastDeviceRefresh = 0
         return { ok: true, message: `Vaga ${slot.id}: ${c.device} · Android ${c.osVersion}` }
       }
       case "bs_remove_slot": {
-        if ([...this.running.values()].some((r) => r.serial === slotKey(c.id))) return { ok: false, message: "Vaga ocupada com um caso; aguarde terminar" }
+        if ([...this.running.values()].some((r) => r.serial === slotKey(c.id)))
+          return { ok: false, message: "Vaga ocupada com um caso; aguarde terminar" }
         this.bs = { ...this.bs, slots: this.bs.slots.filter((x) => x.id !== c.id) }
         await writeJsonAtomic(this.p.browserstack, this.bs)
         this.lastDeviceRefresh = 0
@@ -807,10 +977,16 @@ export class Runner {
       }
       case "bs_set_slot_enabled": {
         if (!this.bs.slots.some((x) => x.id === c.id)) return { ok: false, message: "Vaga não encontrada" }
-        this.bs = { ...this.bs, slots: this.bs.slots.map((x) => (x.id === c.id ? { ...x, enabled: c.enabled } : x)) }
+        this.bs = {
+          ...this.bs,
+          slots: this.bs.slots.map((x) => (x.id === c.id ? { ...x, enabled: c.enabled } : x)),
+        }
         await writeJsonAtomic(this.p.browserstack, this.bs)
         this.lastDeviceRefresh = 0
-        return { ok: true, message: `Vaga ${c.id} ${c.enabled ? "ativada" : "desativada (termina o caso atual)"}` }
+        return {
+          ok: true,
+          message: `Vaga ${c.id} ${c.enabled ? "ativada" : "desativada (termina o caso atual)"}`,
+        }
       }
       case "bs_set_run_on": {
         const id = c.machineId || undefined
@@ -834,10 +1010,18 @@ export class Runner {
         await writeJsonAtomic(this.p.settings, this.settings)
         const msgs: string[] = []
         if (c.maxParallel !== undefined) {
-          msgs.push(c.maxParallel ? `Máximo de ${c.maxParallel} caso(s) ao mesmo tempo (os que já estão rodando continuam)` : "Sem limite de casos ao mesmo tempo")
+          msgs.push(
+            c.maxParallel
+              ? `Máximo de ${c.maxParallel} caso(s) ao mesmo tempo (os que já estão rodando continuam)`
+              : "Sem limite de casos ao mesmo tempo",
+          )
         }
         if (c.maxScreenSessions !== undefined) {
-          msgs.push(c.maxScreenSessions ? `Até ${c.maxScreenSessions} celular(es) com tela ao vivo ao mesmo tempo` : "Tela ao vivo desligada")
+          msgs.push(
+            c.maxScreenSessions
+              ? `Até ${c.maxScreenSessions} celular(es) com tela ao vivo ao mesmo tempo`
+              : "Tela ao vivo desligada",
+          )
         }
         return { ok: true, message: msgs.join(" · ") || "Nada alterado" }
       }
@@ -851,26 +1035,41 @@ export class Runner {
         const q = this.queues.get(c.queueId)
         if (!q) return { ok: false, message: "Fila não encontrada" }
         const other = [...this.queues.values()].find(
-          (x) => x.id !== q.id && (x.status === "running" || x.status === "paused") && x.appId !== q.appId && x.items.some((i) => i.status === "queued" || i.status === "running"),
+          (x) =>
+            x.id !== q.id &&
+            (x.status === "running" || x.status === "paused") &&
+            x.appId !== q.appId &&
+            x.items.some((i) => i.status === "queued" || i.status === "running"),
         )
-        if (other) return { ok: false, message: `A fila "${other.name}" usa outro app. Aguarde ou cancele antes de rodar este caso de novo.` }
+        if (other)
+          return {
+            ok: false,
+            message: `A fila "${other.name}" usa outro app. Aguarde ou cancele antes de rodar este caso de novo.`,
+          }
         const it = q.items.find((i) => i.id === c.itemId)
         const reopened = this.updateQueue(q.id, (cur) => reopenItem(cur, c.itemId) ?? cur)
         if (!reopened || reopened.items.find((i) => i.id === c.itemId)?.status !== "queued") {
           return { ok: false, message: "Só é possível rodar de novo um caso que falhou" }
         }
         await this.pickActiveApp()
-        return { ok: true, message: `"${it?.name}" voltou para a fila`, data: { queueId: q.id, itemId: c.itemId } }
+        return {
+          ok: true,
+          message: `"${it?.name}" voltou para a fila`,
+          data: { queueId: q.id, itemId: c.itemId },
+        }
       }
       case "delete_queue": {
         const q = this.queues.get(c.queueId)
         if (!q) return { ok: false, message: "Fila não encontrada" }
-        if (q.status === "running" || q.status === "paused") return { ok: false, message: "Cancele a fila antes de apagar" }
+        if (q.status === "running" || q.status === "paused")
+          return { ok: false, message: "Cancele a fila antes de apagar" }
         await this.deleteQueue(q.id)
         return { ok: true, message: `Fila "${q.name}" apagada` }
       }
       case "clear_queues": {
-        const finished = [...this.queues.values()].filter((q) => q.status === "done" || q.status === "canceled")
+        const finished = [...this.queues.values()].filter(
+          (q) => q.status === "done" || q.status === "canceled",
+        )
         const active = this.queues.size - finished.length
         for (const q of finished) await this.deleteQueue(q.id)
         return {
@@ -883,7 +1082,8 @@ export class Runner {
         if (c.machineId && c.machineId !== this.cfg.machineId) {
           const m = this.remote.get(c.machineId)
           if (!m) return { ok: false, message: "Máquina não encontrada" }
-          if (c.count > m.maxDevices) return { ok: false, message: `${m.name} aceita no máximo ${m.maxDevices} emuladores` }
+          if (c.count > m.maxDevices)
+            return { ok: false, message: `${m.name} aceita no máximo ${m.maxDevices} emuladores` }
           this.remote.setDesired(m.id, c.count)
           this.remote.queueOp(m.id, { kind: "start", count: c.count })
           await this.saveDesired()
@@ -899,13 +1099,15 @@ export class Runner {
         if (c.machineId && c.machineId !== this.cfg.machineId) {
           const m = this.remote.get(c.machineId)
           if (!m) return { ok: false, message: "Máquina não encontrada" }
-          if ([...this.running.values()].some((r) => r.machineId === m.id)) return { ok: false, message: `Há casos rodando em ${m.name}. Aguarde ou cancele antes.` }
+          if ([...this.running.values()].some((r) => r.machineId === m.id))
+            return { ok: false, message: `Há casos rodando em ${m.name}. Aguarde ou cancele antes.` }
           this.remote.setDesired(m.id, 0)
           this.remote.queueOp(m.id, { kind: "stopAll" })
           await this.saveDesired()
           return { ok: true, message: `Desligando os celulares de ${m.name}` }
         }
-        if ([...this.running.values()].some((r) => !r.machineId)) return { ok: false, message: "Há casos em execução. Pause ou cancele as filas antes." }
+        if ([...this.running.values()].some((r) => !r.machineId))
+          return { ok: false, message: "Há casos em execução. Pause ou cancele as filas antes." }
         this.desired = 0
         await this.saveDesired()
         this.farmOps = [{ kind: "stopAll" }]
@@ -916,8 +1118,10 @@ export class Runner {
       }
       case "restart_device": {
         const d = this.devices.get(c.serial)
-        if (!d || d.kind !== "emulator" || !d.index) return { ok: false, message: "Só é possível reiniciar emuladores da fazenda" }
-        if ([...this.running.values()].some((r) => r.serial === c.serial)) return { ok: false, message: "Celular ocupado com um caso" }
+        if (!d || d.kind !== "emulator" || !d.index)
+          return { ok: false, message: "Só é possível reiniciar emuladores da fazenda" }
+        if ([...this.running.values()].some((r) => r.serial === c.serial))
+          return { ok: false, message: "Celular ocupado com um caso" }
         this.restartDevice(d.index, "reinício pedido pelo usuário")
         return { ok: true, message: `Reiniciando ${c.serial}` }
       }
@@ -926,10 +1130,14 @@ export class Runner {
         if (c.enabled) {
           if (!d) return { ok: false, message: "Aparelho não está conectado" }
           if (d.kind !== "physical") return { ok: false, message: "Só aparelhos físicos podem ser ativados" }
-          if (!this.physical.has(c.serial)) this.physical.set(c.serial, nextPhysicalIndex(this.physical.values()))
+          if (!this.physical.has(c.serial))
+            this.physical.set(c.serial, nextPhysicalIndex(this.physical.values()))
           await writeJsonAtomic(this.p.physical, { enabled: Object.fromEntries(this.physical) })
           this.lastDeviceRefresh = 0
-          return { ok: true, message: `${c.serial} ativado: vai receber casos (o app de teste será instalado nele)` }
+          return {
+            ok: true,
+            message: `${c.serial} ativado: vai receber casos (o app de teste será instalado nele)`,
+          }
         }
         if ([...this.running.values()].some((r) => r.serial === c.serial)) {
           return { ok: false, message: "Celular ocupado com um caso; desative quando ele terminar" }
@@ -942,7 +1150,8 @@ export class Runner {
         return { ok: true, message: `${c.serial} desativado: não recebe mais casos` }
       }
       case "set_emulator_enabled": {
-        if (!/^([a-z0-9-]+:)?emulator-\d+$/.test(c.serial)) return { ok: false, message: "Use esta opção só em emuladores" }
+        if (!/^([a-z0-9-]+:)?emulator-\d+$/.test(c.serial))
+          return { ok: false, message: "Use esta opção só em emuladores" }
         if (c.enabled) this.disabledEmulators.delete(c.serial)
         else this.disabledEmulators.add(c.serial)
         await writeJsonAtomic(this.p.emulatorsDisabled, { disabled: [...this.disabledEmulators].sort() })
@@ -958,8 +1167,21 @@ export class Runner {
       case "add_machine": {
         if (c.directUrl && !this.cfg.fake) return { ok: false, message: "URL direta só no modo simulado" }
         try {
-          const m = await this.remote.add({ id: c.id, name: c.name, host: c.host, sshUser: c.sshUser, sshPort: c.sshPort, maxDevices: c.maxDevices, directUrl: c.directUrl, token: c.token })
-          return { ok: true, message: `Máquina ${m.name} cadastrada (slot ${m.slot})`, data: { id: m.id, slot: m.slot } }
+          const m = await this.remote.add({
+            id: c.id,
+            name: c.name,
+            host: c.host,
+            sshUser: c.sshUser,
+            sshPort: c.sshPort,
+            maxDevices: c.maxDevices,
+            directUrl: c.directUrl,
+            token: c.token,
+          })
+          return {
+            ok: true,
+            message: `Máquina ${m.name} cadastrada (slot ${m.slot})`,
+            data: { id: m.id, slot: m.slot },
+          }
         } catch (e) {
           return { ok: false, message: (e as Error).message }
         }
@@ -974,7 +1196,8 @@ export class Runner {
         }
       }
       case "remove_machine": {
-        if ([...this.running.values()].some((r) => r.machineId === c.id)) return { ok: false, message: "Há casos rodando nessa máquina. Desative e aguarde terminar." }
+        if ([...this.running.values()].some((r) => r.machineId === c.id))
+          return { ok: false, message: "Há casos rodando nessa máquina. Desative e aguarde terminar." }
         try {
           await this.remote.remove(c.id)
           await this.saveDesired()
@@ -992,7 +1215,11 @@ export class Runner {
         }
         return {
           ok: true,
-          message: c.enabled ? "Máquina ativada: volta a receber casos" : busyThere ? "Máquina drenando: termina os casos atuais e não recebe novos" : "Máquina desativada",
+          message: c.enabled
+            ? "Máquina ativada: volta a receber casos"
+            : busyThere
+              ? "Máquina drenando: termina os casos atuais e não recebe novos"
+              : "Máquina desativada",
         }
       }
       case "project_fetch":
@@ -1025,24 +1252,32 @@ export class Runner {
       }
       case "deploy_machine": {
         return this.remote.deploy(c.id, this.cfg.repoRoot, (ok, out) => {
-          this.log(`agente em ${c.id}: ${ok ? "instalado" : "falhou"} — ${out.split("\n").slice(-3).join(" | ")}`)
+          this.log(
+            `agente em ${c.id}: ${ok ? "instalado" : "falhou"} — ${out.split("\n").slice(-3).join(" | ")}`,
+          )
         })
       }
       case "rotate_machine_token": {
         try {
           await this.remote.rotateToken(c.id)
-          return { ok: true, message: "Token trocado. Use \"Instalar agente\" para levar o token novo ao worker." }
+          return {
+            ok: true,
+            message: 'Token trocado. Use "Instalar agente" para levar o token novo ao worker.',
+          }
         } catch (e) {
           return { ok: false, message: (e as Error).message }
         }
       }
       case "restart_appiums": {
-        if (this.running.size > 0) return { ok: false, message: "Há casos em execução. Pause ou cancele as filas antes." }
+        if (this.running.size > 0)
+          return { ok: false, message: "Há casos em execução. Pause ou cancele as filas antes." }
         await this.appium.stopAll()
         return { ok: true, message: "Appiums reiniciados" }
       }
       case "delete_app": {
-        const inUse = [...this.queues.values()].some((q) => q.appId === c.appId && (q.status === "running" || q.status === "paused"))
+        const inUse = [...this.queues.values()].some(
+          (q) => q.appId === c.appId && (q.status === "running" || q.status === "paused"),
+        )
         if (inUse) return { ok: false, message: "App em uso por uma fila ativa" }
         await fsp.rm(this.p.app(c.appId), { recursive: true, force: true })
         this.appMetaCache.delete(c.appId)
@@ -1085,7 +1320,9 @@ export class Runner {
     this.remote.reconcileDesired(
       (id) =>
         new Set(
-          [...this.devices.values()].filter((d) => d.machineId === id && d.kind === "emulator" && d.index).map((d) => splitIndex(d.index!).local),
+          [...this.devices.values()]
+            .filter((d) => d.machineId === id && d.kind === "emulator" && d.index)
+            .map((d) => splitIndex(d.index!).local),
         ),
       (id, local) => {
         const m = this.remote.get(id)
@@ -1094,14 +1331,21 @@ export class Runner {
     )
     // desativada e sem casos rodando: termina de drenar
     for (const m of this.remote.machines()) {
-      if (!m.enabled && ![...this.running.values()].some((r) => r.machineId === m.id || r.remote?.host === m.id)) this.remote.drained(m.id)
+      if (
+        !m.enabled &&
+        ![...this.running.values()].some((r) => r.machineId === m.id || r.remote?.host === m.id)
+      )
+        this.remote.drained(m.id)
     }
   }
 
   private async refreshDevices(): Promise<void> {
     this.adbRaw = await this.ad.adb.devicesRaw()
     const remoteDevices = this.remote.devices()
-    const parsed: Array<ReturnType<typeof parseAdbDevices>[number] & { machineId?: string }> = [...parseAdbDevices(this.adbRaw), ...remoteDevices]
+    const parsed: Array<ReturnType<typeof parseAdbDevices>[number] & { machineId?: string }> = [
+      ...parseAdbDevices(this.adbRaw),
+      ...remoteDevices,
+    ]
     const qemu = await this.ad.farm.qemuPids()
     for (const d of remoteDevices) if (d.globalIndex && d.qemuPid) qemu.set(d.globalIndex, d.qemuPid)
     const meta = await this.appMeta(this.activeAppId)
@@ -1129,7 +1373,9 @@ export class Runner {
         kind: d.kind,
         adbState: d.adbState,
         index: d.index,
-        name: d.index ? `${d.machineId ? `${d.machineId} · ` : ""}farm-${String(splitIndex(d.index).local).padStart(2, "0")}` : undefined,
+        name: d.index
+          ? `${d.machineId ? `${d.machineId} · ` : ""}farm-${String(splitIndex(d.index).local).padStart(2, "0")}`
+          : undefined,
         machineId: d.machineId,
         model: d.model,
         state: "offline",
@@ -1138,7 +1384,12 @@ export class Runner {
       }
       const isPhysical = d.kind === "physical"
       if (isPhysical && d.machineId) {
-        next.set(d.serial, { ...base, state: "external", enabled: false, note: "Aparelho USB em worker ainda não é usado nos testes" })
+        next.set(d.serial, {
+          ...base,
+          state: "external",
+          enabled: false,
+          note: "Aparelho USB em worker ainda não é usado nos testes",
+        })
         continue
       }
       if (isPhysical && !this.physical.has(d.serial)) {
@@ -1168,13 +1419,20 @@ export class Runner {
       }
       if (d.adbState !== "device") {
         const hint = d.adbState === "unauthorized" ? " — autorize a depuração USB no celular" : ""
-        next.set(d.serial, { ...base, state: base.qemuPid ? "booting" : "offline", note: `adb: ${d.adbState}${hint}` })
+        next.set(d.serial, {
+          ...base,
+          state: base.qemuPid ? "booting" : "offline",
+          note: `adb: ${d.adbState}${hint}`,
+        })
         continue
       }
       readyChecks.push(
         (async () => {
           const prev = this.devices.get(d.serial)
-          const booted = prev && (prev.state === "ready" || prev.state === "installing") ? true : await this.adb.bootCompleted(d.serial)
+          const booted =
+            prev && (prev.state === "ready" || prev.state === "installing")
+              ? true
+              : await this.adb.bootCompleted(d.serial)
           if (!booted) {
             next.set(d.serial, { ...base, state: "booting" })
             return
@@ -1191,7 +1449,8 @@ export class Runner {
             const vc = this.appVersions.get(d.serial)
             if (vc !== meta.versionCode) {
               const failed = this.installFailures.get(d.serial)
-              const recent = failed && failed.versionCode === meta.versionCode && Date.now() - failed.at < INSTALL_RETRY_MS
+              const recent =
+                failed && failed.versionCode === meta.versionCode && Date.now() - failed.at < INSTALL_RETRY_MS
               if (!recent) this.startInstall(d.serial, meta, isPhysical)
               const note = recent ? failed.note : `Instalando ${meta.versionName} (${meta.versionCode})`
               next.set(d.serial, { ...base, state: "installing", appVersionCode: vc, note })
@@ -1217,13 +1476,25 @@ export class Runner {
     await Promise.all(readyChecks)
 
     // emulador que estava na fazenda e sumiu do adb (qemu morreu) → reinicia já, sem esperar a reconciliação
-    const stopping = this.farmOps.some((o) => o.kind === "stopAll") || this.farmJob?.command === "desligar todos"
+    const stopping =
+      this.farmOps.some((o) => o.kind === "stopAll") || this.farmJob?.command === "desligar todos"
     for (const prev of this.devices.values()) {
       const idx = prev.index
-      if (prev.kind !== "emulator" || prev.machineId === BS_MACHINE_ID || !idx || next.has(prev.serial) || this.maintenance.has(idx)) continue
+      if (
+        prev.kind !== "emulator" ||
+        prev.machineId === BS_MACHINE_ID ||
+        !idx ||
+        next.has(prev.serial) ||
+        this.maintenance.has(idx)
+      )
+        continue
       if (prev.machineId) {
         // worker: só reinicia se a máquina está respondendo (sem resposta = problema de rede, não do emulador)
-        if (!this.remote.isReachable(prev.machineId) || splitIndex(idx).local > this.remote.desiredOf(prev.machineId)) continue
+        if (
+          !this.remote.isReachable(prev.machineId) ||
+          splitIndex(idx).local > this.remote.desiredOf(prev.machineId)
+        )
+          continue
         if (prev.state === "maintenance") continue
         this.restartDevice(idx, "sumiu do adb")
         continue
@@ -1238,7 +1509,17 @@ export class Runner {
     // aparelho físico ativado mas desconectado continua visível (e ativado)
     for (const [serial, idx] of this.physical) {
       if (next.has(serial)) continue
-      next.set(serial, { serial, kind: "physical", adbState: "missing", index: idx, name: serial, state: "offline", enabled: true, note: "Desconectado do USB", updatedAt: now })
+      next.set(serial, {
+        serial,
+        kind: "physical",
+        adbState: "missing",
+        index: idx,
+        name: serial,
+        state: "offline",
+        enabled: true,
+        note: "Desconectado do USB",
+        updatedAt: now,
+      })
     }
 
     // emuladores em manutenção que nem aparecem no adb continuam visíveis
@@ -1267,11 +1548,12 @@ export class Runner {
     }
     this.devices = next
     const appiumReady: Record<string, boolean> = {}
-    for (const d of next.values()) if (d.index) appiumReady[d.serial] = d.state === "ready" || d.state === "busy"
+    for (const d of next.values())
+      if (d.index) appiumReady[d.serial] = d.state === "ready" || d.state === "busy"
     const state: DevicesState = {
       updatedAt: now,
-      devices: [...next.values()].sort(
-        (a, b) => (a.kind === b.kind ? (a.index ?? 0) - (b.index ?? 0) : a.kind === "emulator" ? -1 : 1),
+      devices: [...next.values()].sort((a, b) =>
+        a.kind === b.kind ? (a.index ?? 0) - (b.index ?? 0) : a.kind === "emulator" ? -1 : 1,
       ),
       adbRaw: this.adbRaw,
       appiumReady,
@@ -1308,8 +1590,12 @@ export class Runner {
     if (this.desired <= 0 || this.farmBusy || this.farmOps.length > 0) return
     if (this.health?.blockStart) return // disco quase cheio: não liga emuladores novos
     if (Date.now() - this.lastDesiredAttempt < DESIRED_RETRY_MS) return
-    const present = new Set([...this.devices.values()].filter((d) => d.kind === "emulator" && !d.machineId).map((d) => d.index))
-    const missing = Array.from({ length: this.desired }, (_, k) => k + 1).filter((i) => !present.has(i) && !this.maintenance.has(i))
+    const present = new Set(
+      [...this.devices.values()].filter((d) => d.kind === "emulator" && !d.machineId).map((d) => d.index),
+    )
+    const missing = Array.from({ length: this.desired }, (_, k) => k + 1).filter(
+      (i) => !present.has(i) && !this.maintenance.has(i),
+    )
     if (missing.length === 0) return
     this.lastDesiredAttempt = Date.now()
     this.log(`faltam celulares ${missing.join(",")} (desejado ${this.desired}) → ligando`)
@@ -1353,10 +1639,21 @@ export class Runner {
         if (it.status !== "running" || this.running.has(`${q.id}/${it.id}`)) continue
         const a = it.attempts.at(-1)
         if (!a) continue
-        const res = await readJson(path.join(this.p.runs, a.dir, "result.json"), RunResultSchema.nullable(), null)
+        const res = await readJson(
+          path.join(this.p.runs, a.dir, "result.json"),
+          RunResultSchema.nullable(),
+          null,
+        )
         if (this.running.has(`${q.id}/${it.id}`)) continue // começou de novo enquanto líamos
-        const result = res ?? { status: "infra_error" as const, message: "Tentativa perdida pelo runner", screenshots: [], hasOutputXml: false }
-        this.log(`reconciliado ${q.id}/${it.id}: ${result.status}${res ? " (result.json)" : " (sem result.json)"}`)
+        const result = res ?? {
+          status: "infra_error" as const,
+          message: "Tentativa perdida pelo runner",
+          screenshots: [],
+          hasOutputXml: false,
+        }
+        this.log(
+          `reconciliado ${q.id}/${it.id}: ${result.status}${res ? " (result.json)" : " (sem result.json)"}`,
+        )
         const at = res ? await this.resultTime(a.dir, res) : new Date()
         this.updateQueue(q.id, (cur) => applyResult(cur, it.id, a.n, result, at))
       }
@@ -1366,7 +1663,14 @@ export class Runner {
   private async dispatch(): Promise<void> {
     await this.pickActiveApp()
     const free = [...this.devices.values()]
-      .filter((d) => d.enabled !== false && (d.kind === "emulator" || d.enabled) && d.state === "ready" && d.index && ![...this.running.values()].some((r) => r.serial === d.serial))
+      .filter(
+        (d) =>
+          d.enabled !== false &&
+          (d.kind === "emulator" || d.enabled) &&
+          d.state === "ready" &&
+          d.index &&
+          ![...this.running.values()].some((r) => r.serial === d.serial),
+      )
       .filter((d) => !this.breaker.blockedUntil(d.serial))
       .map((d) => ({ serial: d.serial, index: d.index!, machineId: d.machineId }))
     if (free.length === 0) return
@@ -1382,14 +1686,23 @@ export class Runner {
       budget.set("", 0)
       if (Date.now() - this.lastBrakeLog > 60_000) {
         this.lastBrakeLog = Date.now()
-        this.log(`freio de saúde ativo (${this.health.alerts.filter((a) => a.level === "crit").map((a) => a.message).join("; ")}): novos casos aguardam`)
+        this.log(
+          `freio de saúde ativo (${this.health.alerts
+            .filter((a) => a.level === "crit")
+            .map((a) => a.message)
+            .join("; ")}): novos casos aguardam`,
+        )
       }
     }
     for (const m of this.remote.machines()) {
       budget.set(
         m.id,
         dispatchBudget(
-          { online: this.remote.isOnline(m.id), memAvailableMb: this.remote.memAvailableMb(m.id), brake: this.remote.healthOf(m.id)?.brake ?? false },
+          {
+            online: this.remote.isOnline(m.id),
+            memAvailableMb: this.remote.memAvailableMb(m.id),
+            brake: this.remote.healthOf(m.id)?.brake ?? false,
+          },
           this.cfg,
         ),
       )
@@ -1399,7 +1712,9 @@ export class Runner {
     const bsHost = this.robotHostFor(BS_MACHINE_ID)
     if (bsHost === null && this.bs.enabled && Date.now() - this.lastBsHostLog > 60_000) {
       this.lastBsHostLog = Date.now()
-      this.log(`BrowserStack: robot configurado para ${this.bs.runOn}, que não está pronto (offline ou sem robot): casos aguardam`)
+      this.log(
+        `BrowserStack: robot configurado para ${this.bs.runOn}, que não está pronto (offline ou sem robot): casos aguardam`,
+      )
     }
     budget.set(
       BS_MACHINE_ID,
@@ -1421,7 +1736,9 @@ export class Runner {
     if (slots <= 0) {
       if (Date.now() - this.lastParallelLog > 60_000) {
         this.lastParallelLog = Date.now()
-        this.log(`limite de ${this.settings.maxParallel} caso(s) ao mesmo tempo atingido: novos casos aguardam`)
+        this.log(
+          `limite de ${this.settings.maxParallel} caso(s) ao mesmo tempo atingido: novos casos aguardam`,
+        )
       }
       return
     }
@@ -1506,7 +1823,8 @@ export class Runner {
     let snap = this.snapshot
     if (!snap || (q.snapshotHash && snap.hash !== q.snapshotHash)) {
       const dir = path.join(this.p.workspaces, q.snapshotHash ?? "")
-      snap = q.snapshotHash && fs.existsSync(dir) ? { hash: q.snapshotHash, dir } : await this.ensureSnapshot()
+      snap =
+        q.snapshotHash && fs.existsSync(dir) ? { hash: q.snapshotHash, dir } : await this.ensureSnapshot()
     }
     if (this.cfg.fake) snap = await this.ensureSnapshot()
     const host = this.robotHostFor(machineId)
@@ -1518,7 +1836,9 @@ export class Runner {
         await agent!.ensureWorkspace(snap.hash, snap.dir) // 1 envio por revisão do projeto
       } catch (e) {
         this.workspaceFailAt.set(host, Date.now())
-        this.log(`não consegui enviar o projeto para ${host}: ${(e as Error).message} — por ${WORKSPACE_RETRY_MS / 60_000} min o robot dos celulares dele roda no mestre`)
+        this.log(
+          `não consegui enviar o projeto para ${host}: ${(e as Error).message} — por ${WORKSPACE_RETRY_MS / 60_000} min o robot dos celulares dele roda no mestre`,
+        )
         return
       }
     }
@@ -1550,13 +1870,26 @@ export class Runner {
       QAFARM_APP_ACTIVITY: meta.launchableActivity,
       ...this.bsEnv(a.serial, q.name, it.name, meta),
     }
+    // BrowserStack com robot num worker: sai para a internet pelo mestre (o worker pode estar sem rota)
+    const proxyVars =
+      host && machineId === BS_MACHINE_ID && this.remote.usesProxy(host)
+        ? {
+            HTTPS_PROXY: WORKER_PROXY_URL,
+            https_proxy: WORKER_PROXY_URL,
+            NO_PROXY: "127.0.0.1,localhost",
+            no_proxy: "127.0.0.1,localhost",
+          }
+        : {}
     // robot no worker: o agente completa PATH/SDK/Java com os caminhos de lá (e a URL do Appium local dele)
-    const env = host ? buildRobotEnv({}, robotVars) : buildRobotEnv(baseEnv, robotVars)
+    const env = host ? buildRobotEnv({}, { ...robotVars, ...proxyVars }) : buildRobotEnv(baseEnv, robotVars)
     const appiumIndex = host && machineId !== BS_MACHINE_ID ? splitIndex(index).local : undefined
     if (appiumIndex) delete env.QAFARM_APPIUM_URL
     // "Esperas ×N" da fila: multiplica as variáveis de espera do projeto sem alterar o projeto
     const factor = q.options.waitFactor ?? 1
-    const timeoutText = factor > 1 ? await fsp.readFile(path.join(snap.dir, this.cfg.robotTimeoutFile), "utf8").catch(() => "") : ""
+    const timeoutText =
+      factor > 1
+        ? await fsp.readFile(path.join(snap.dir, this.cfg.robotTimeoutFile), "utf8").catch(() => "")
+        : ""
     const args = buildRobotArgs({
       extraVars: scaledTimeoutArgs(parseTimeoutVariables(timeoutText), factor),
       listenerPath: path.join(host ? RUN_REPO : this.cfg.repoRoot, "scripts/robot/qafarm_listener.py"),
@@ -1579,13 +1912,20 @@ export class Runner {
       }
       remote = { host, runId, offset: 0, lastOkAt: Date.now(), polling: false, finishing: false }
     } else {
-      const spawned = this.ad.robot.spawn({ args, env, cwd: snap.dir, consoleFile: path.join(dir, "console.log") })
+      const spawned = this.ad.robot.spawn({
+        args,
+        env,
+        cwd: snap.dir,
+        consoleFile: path.join(dir, "console.log"),
+      })
       pgid = spawned.pid
       exited = spawned.exited
     }
     const startedAt = new Date().toISOString()
     const relDir = path.relative(this.p.runs, dir)
-    const qemuPid = machineId ? this.devices.get(a.serial)?.qemuPid : (await this.ad.farm.qemuPids()).get(index)
+    const qemuPid = machineId
+      ? this.devices.get(a.serial)?.qemuPid
+      : (await this.ad.farm.qemuPids()).get(index)
     const cloud = machineId === BS_MACHINE_ID
     const ra: RunningAttempt = {
       queueId: q.id,
@@ -1610,11 +1950,33 @@ export class Runner {
       ...cur,
       items: cur.items.map((i) =>
         i.id === it.id
-          ? { ...i, status: "running", attempts: [...i.attempts, { n, serial: a.serial, startedAt, status: "running", dir: relDir, pgid: pgid || undefined, machineId, robotOn: host }] }
+          ? {
+              ...i,
+              status: "running",
+              attempts: [
+                ...i.attempts,
+                {
+                  n,
+                  serial: a.serial,
+                  startedAt,
+                  status: "running",
+                  dir: relDir,
+                  pgid: pgid || undefined,
+                  machineId,
+                  robotOn: host,
+                },
+              ],
+            }
           : i,
       ),
     }))
-    this.devices.set(a.serial, { ...this.devices.get(a.serial)!, state: "busy", currentQueueId: q.id, currentItemId: it.id, currentTestName: it.name })
+    this.devices.set(a.serial, {
+      ...this.devices.get(a.serial)!,
+      state: "busy",
+      currentQueueId: q.id,
+      currentItemId: it.id,
+      currentTestName: it.name,
+    })
     ra.timers.push(
       setTimeout(() => {
         ra.timedOut = true
@@ -1622,9 +1984,12 @@ export class Runner {
         this.kill(ra)
       }, q.options.timeoutSec * 1000),
     )
-    this.log(`▶ ${q.id}/${it.id} "${it.name}" em ${a.serial} (tentativa ${n}${host ? `, robot em ${host}` : ""})`)
+    this.log(
+      `▶ ${q.id}/${it.id} "${it.name}" em ${a.serial} (tentativa ${n}${host ? `, robot em ${host}` : ""})`,
+    )
     if (exited) void exited.then((res) => this.finishAttempt(ra, res.code))
-    else ra.timers.push(setInterval(() => void this.pollRemoteRun(ra), this.opts.remotePollMs ?? REMOTE_POLL_MS))
+    else
+      ra.timers.push(setInterval(() => void this.pollRemoteRun(ra), this.opts.remotePollMs ?? REMOTE_POLL_MS))
   }
 
   /**
@@ -1633,11 +1998,12 @@ export class Runner {
    * a máquina escolhida no card (se ela não estiver pronta, espera em vez de voltar a pesar no mestre).
    */
   private robotHostFor(machineId?: string): string | undefined | null {
-    const failedRecently = (id: string) => Date.now() - (this.workspaceFailAt.get(id) ?? 0) < WORKSPACE_RETRY_MS
+    const failedRecently = (id: string) =>
+      Date.now() - (this.workspaceFailAt.get(id) ?? 0) < WORKSPACE_RETRY_MS
     if (machineId === BS_MACHINE_ID) {
       const id = this.bs.runOn
       if (!id) return undefined
-      return this.remote.canRunRobot(id) && !failedRecently(id) ? id : null
+      return this.remote.canRunRobot(id) && this.remote.proxyUp(id) && !failedRecently(id) ? id : null
     }
     return machineId && this.remote.runsRobot(machineId) && !failedRecently(machineId) ? machineId : undefined
   }
@@ -1665,7 +2031,9 @@ export class Runner {
     } catch (e) {
       const silent = Date.now() - rr.lastOkAt
       if (silent > this.cfg.remoteOfflineMs * 2 && !rr.finishing) {
-        this.log(`${rr.host} sem resposta há ${Math.round(silent / 1000)} s durante ${ra.queueId}/${ra.itemId} (${(e as Error).message}): caso volta para a fila`)
+        this.log(
+          `${rr.host} sem resposta há ${Math.round(silent / 1000)} s durante ${ra.queueId}/${ra.itemId} (${(e as Error).message}): caso volta para a fila`,
+        )
         rr.finishing = true
         rr.unreachable = true
         ra.deviceLost = true
@@ -1678,7 +2046,10 @@ export class Runner {
 
   private async pullRemoteConsole(ra: RunningAttempt): Promise<void> {
     const rr = ra.remote!
-    const buf = await this.remote.client(rr.host)?.runFile(rr.runId, "console.log", rr.offset).catch(() => null)
+    const buf = await this.remote
+      .client(rr.host)
+      ?.runFile(rr.runId, "console.log", rr.offset)
+      .catch(() => null)
     if (!buf?.length) return
     await fsp.appendFile(path.join(ra.dir, "console.log"), buf)
     rr.offset += buf.length
@@ -1697,7 +2068,9 @@ export class Runner {
         const dest = path.resolve(root, f.name)
         if (!dest.startsWith(`${root}${path.sep}`)) continue
         if (f.size > REMOTE_FILE_MAX) {
-          this.log(`artefato ${f.name} de ${ra.queueId}/${ra.itemId} grande demais (${Math.round(f.size / 1048576)} MB): ficou em ${rr.host}`)
+          this.log(
+            `artefato ${f.name} de ${ra.queueId}/${ra.itemId} grande demais (${Math.round(f.size / 1048576)} MB): ficou em ${rr.host}`,
+          )
           continue
         }
         await fsp.mkdir(path.dirname(dest), { recursive: true })
@@ -1705,7 +2078,9 @@ export class Runner {
       }
       await c.runDelete(rr.runId)
     } catch (e) {
-      this.log(`não consegui trazer os artefatos de ${ra.queueId}/${ra.itemId} de ${rr.host}: ${(e as Error).message}`)
+      this.log(
+        `não consegui trazer os artefatos de ${ra.queueId}/${ra.itemId} de ${rr.host}: ${(e as Error).message}`,
+      )
       this.remoteCleanup.push({ host: rr.host, runId: rr.runId, since: Date.now() })
     }
   }
@@ -1745,7 +2120,8 @@ export class Runner {
     for (const t of ra.timers) clearTimeout(t)
     killGroup(ra.pgid, "SIGKILL") // garante que nenhum filho ficou para trás
     if (ra.remote && !ra.remote.unreachable) await this.collectRemoteRun(ra)
-    else if (ra.remote) this.remoteCleanup.push({ host: ra.remote.host, runId: ra.remote.runId, since: Date.now() })
+    else if (ra.remote)
+      this.remoteCleanup.push({ host: ra.remote.host, runId: ra.remote.runId, since: Date.now() })
     const read = (f: string) => fsp.readFile(path.join(ra.dir, f), "utf8").catch(() => undefined)
     const outputXml = await read("output.xml")
     const consoleFull = (await read("console.log")) ?? ""
@@ -1775,19 +2151,33 @@ export class Runner {
           return 0
         })
     if (removed) this.log(`${removed} sessão(ões) do Appium encerrada(s) para ${ra.serial}`)
-    await writeJsonAtomic(path.join(ra.dir, "result.json"), { ...result, finishedAt: finishedAt.toISOString() })
+    await writeJsonAtomic(path.join(ra.dir, "result.json"), {
+      ...result,
+      finishedAt: finishedAt.toISOString(),
+    })
     this.running.delete(`${ra.queueId}/${ra.itemId}`)
     this.updateQueue(ra.queueId, (cur) => applyResult(cur, ra.itemId, ra.n, result, finishedAt))
     if (!ra.canceled) {
       const b = this.breaker.record(ra.serial, result.status)
       if (b.tripped) {
-        this.log(`${ra.serial}: ${b.streak} erros de infraestrutura seguidos → pausado por 5 min (os casos seguem nos outros celulares)`)
+        this.log(
+          `${ra.serial}: ${b.streak} erros de infraestrutura seguidos → pausado por 5 min (os casos seguem nos outros celulares)`,
+        )
       }
     }
-    this.log(`■ ${ra.queueId}/${ra.itemId} em ${ra.serial}: ${result.status}${result.message ? ` — ${result.message.split("\n")[0].slice(0, 160)}` : ""}`)
+    this.log(
+      `■ ${ra.queueId}/${ra.itemId} em ${ra.serial}: ${result.status}${result.message ? ` — ${result.message.split("\n")[0].slice(0, 160)}` : ""}`,
+    )
     await this.afterCase(ra)
     const d = this.devices.get(ra.serial)
-    if (d && d.state === "busy") this.devices.set(ra.serial, { ...d, state: "ready", currentItemId: undefined, currentQueueId: undefined, currentTestName: undefined })
+    if (d && d.state === "busy")
+      this.devices.set(ra.serial, {
+        ...d,
+        state: "ready",
+        currentItemId: undefined,
+        currentQueueId: undefined,
+        currentTestName: undefined,
+      })
     if (result.status === "infra_error" && !ra.deviceLost) {
       // sessão não abriu: recomeça o Appium desse celular antes de usá-lo de novo
       this.appVersions.delete(ra.serial)
@@ -1798,7 +2188,11 @@ export class Runner {
   killAllRunning(): void {
     for (const ra of this.running.values()) {
       for (const t of ra.timers) clearTimeout(t)
-      if (ra.remote) void this.remote.client(ra.remote.host)?.runKill(ra.remote.runId, "SIGKILL").catch(() => undefined)
+      if (ra.remote)
+        void this.remote
+          .client(ra.remote.host)
+          ?.runKill(ra.remote.runId, "SIGKILL")
+          .catch(() => undefined)
       killGroup(ra.pgid, "SIGKILL")
     }
   }
@@ -1806,7 +2200,11 @@ export class Runner {
   /** Para testes: estado interno resumido. */
   snapshotForTests() {
     return {
-      running: [...this.running.values()].map((r) => ({ queueId: r.queueId, itemId: r.itemId, serial: r.serial })),
+      running: [...this.running.values()].map((r) => ({
+        queueId: r.queueId,
+        itemId: r.itemId,
+        serial: r.serial,
+      })),
       devices: [...this.devices.values()],
       queues: [...this.queues.values()],
       desired: this.desired,
@@ -1814,4 +2212,3 @@ export class Runner {
     }
   }
 }
-

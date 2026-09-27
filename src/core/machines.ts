@@ -35,7 +35,16 @@ export type Machine = z.infer<typeof MachineSchema>
 
 export const MachinesFileSchema = z.object({ machines: z.array(MachineSchema) })
 
-export const MACHINE_STATES = ["pending", "connecting", "online", "degraded", "offline", "incompatible", "draining", "disabled"] as const
+export const MACHINE_STATES = [
+  "pending",
+  "connecting",
+  "online",
+  "degraded",
+  "offline",
+  "incompatible",
+  "draining",
+  "disabled",
+] as const
 export type MachineState = (typeof MACHINE_STATES)[number]
 
 export const MachineStatusSchema = z.object({
@@ -59,7 +68,10 @@ export const MachineStatusSchema = z.object({
   robotRuns: z.number().int().optional(),
 })
 export type MachineStatus = z.infer<typeof MachineStatusSchema>
-export const MachinesStatusFileSchema = z.object({ updatedAt: z.string(), machines: z.array(MachineStatusSchema) })
+export const MachinesStatusFileSchema = z.object({
+  updatedAt: z.string(),
+  machines: z.array(MachineStatusSchema),
+})
 
 /** Chave global do celular: local = serial puro; remoto = "máquina:serial". */
 export function deviceKey(machineId: string | undefined, serial: string): string {
@@ -67,7 +79,10 @@ export function deviceKey(machineId: string | undefined, serial: string): string
 }
 
 /** Separa a chave pelo PRIMEIRO ":" (id de máquina não tem ":", serial TCP pode ter "127.0.0.1:5555"). */
-export function parseDeviceKey(key: string, knownMachines: ReadonlySet<string>): { machineId?: string; serial: string } {
+export function parseDeviceKey(
+  key: string,
+  knownMachines: ReadonlySet<string>,
+): { machineId?: string; serial: string } {
   const i = key.indexOf(":")
   if (i > 0) {
     const id = key.slice(0, i)
@@ -94,6 +109,13 @@ export function localPorts(slot: number): { agent: number; appium: (group: numbe
 
 /** Porta do adb server nas máquinas (mestre e workers). */
 export const ADB_SERVER_PORT = 5037
+
+/**
+ * Proxy de saída no WORKER (127.0.0.1): SOCKS aberto pelo mestre (ssh -R dinâmico) — o robot do worker sai para
+ * a internet pelo mestre. Usado nos casos do BrowserStack (o worker pode estar sem rota para a internet).
+ */
+export const WORKER_PROXY_PORT = 7180
+export const WORKER_PROXY_URL = `socks5h://127.0.0.1:${WORKER_PROXY_PORT}`
 
 export function appiumGroups(maxDevices: number, perGroup: number): number {
   return Math.max(1, Math.ceil(maxDevices / Math.max(1, perGroup)))
