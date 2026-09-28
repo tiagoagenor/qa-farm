@@ -1,6 +1,7 @@
 import os from "node:os"
 import path from "node:path"
 
+import { type ThrottleConfig, throttleConfigFromEnv } from "./cpu-throttle"
 import { type HealthConfig, healthConfigFromEnv } from "./health"
 
 export interface Config {
@@ -50,6 +51,8 @@ export interface Config {
   /** intervalo de leitura da saúde da máquina (ms) */
   metricsIntervalMs: number
   health: HealthConfig
+  /** limite gradual de casos por CPU no mestre */
+  throttle: ThrottleConfig
 }
 
 function num(v: string | undefined, fallback: number): number {
@@ -100,5 +103,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     machineId: env.QAFARM_MACHINE_ID || os.hostname().split(".")[0] || "server01",
     metricsIntervalMs: num(env.QAFARM_METRICS_INTERVAL_MS, 2000),
     health: { ...healthConfigFromEnv(env), memCritMb: num(env.QAFARM_MIN_FREE_MEM_MB, 1500) },
+    throttle: throttleConfigFromEnv(env),
   }
 }

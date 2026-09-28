@@ -88,6 +88,8 @@ export const MachineHealthSchema = z.object({
   alerts: z.array(z.object({ id: z.string(), level: z.enum(["warn", "crit"]), message: z.string() })),
   brake: z.boolean(),
   blockStart: z.boolean(),
+  /** limite gradual de casos por CPU (só o mestre); null/ausente = sem limite */
+  cpuCap: z.number().nullable().optional(),
 })
 
 /** state/metrics.json — gravado só pelo runner; a web só lê. */

@@ -683,6 +683,39 @@ describe("runner (modo fake)", () => {
     ])
   })
 
+  it("CPU saturada reduz os casos ao mesmo tempo em vez de parar tudo e devolve ao folgar", async () => {
+    // Arrange
+    h = await makeHarness({ emulators: 3 })
+    await h.tickUntil(async () => (await h.readyCount()) >= 3 || undefined)
+    const ids = await h.catalogIds((n) => /^CT_(CARTOES|INVESTIMENTOS)_\d+-Caso-(SLOW-)?PASS$/.test(n))
+    const qid = (await h.command({ type: "create_queue", input: { ...queueInput(ids), allowSameAccount: true } })).data!.queueId as string
+    await h.tickUntil(() => h.runner.snapshotForTests().running.length >= 3 || undefined)
+    await h.world((w) => {
+      w.cpuPct = 99
+    })
+
+    // Act
+    const whileHot: number[] = []
+    await h.tickUntil(() => {
+      whileHot.push(h.runner.snapshotForTests().running.length)
+      return liveQueue(qid)!.items.filter((i) => i.status === "passed").length >= 6 || undefined
+    }, 30_000)
+    await h.world((w) => {
+      w.cpuPct = 30
+    })
+    await h.tickUntil(() => finished(liveQueue(qid)) || undefined, 30_000)
+
+    // Assert
+    const afterCut = whileHot.slice(whileHot.findIndex((n) => n <= 2))
+    expect([
+      Math.max(...afterCut) <= 2,
+      afterCut.some((n) => n === 2),
+      h.logs.some((l) => l.includes("limite de 2 caso(s)")),
+      h.logs.some((l) => l.includes("limite por CPU removido")),
+      h.logs.some((l) => l.includes("saúde crítica")),
+    ]).toEqual([true, true, true, true, false])
+  })
+
   it("grava a saúde da máquina em state/metrics.json com o histórico", async () => {
     // Arrange
     h = await makeHarness({ emulators: 1 })

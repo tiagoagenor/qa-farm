@@ -21,7 +21,7 @@ interface MachineDto {
   role: "master" | "worker"
   sample: HostSample | null
   history: HistoryPoint[]
-  health: { level: "ok" | "warn" | "crit"; alerts: Array<{ id: string; level: "warn" | "crit"; message: string }>; brake: boolean; blockStart: boolean }
+  health: { level: "ok" | "warn" | "crit"; alerts: Array<{ id: string; level: "warn" | "crit"; message: string }>; brake: boolean; blockStart: boolean; cpuCap?: number | null }
   ageMs: number | null
   /** estado da conexão (só workers) */
   state?: string
@@ -121,6 +121,9 @@ function MachineCard({ m, memLimitMb }: { m: MachineDto; memLimitMb: number }) {
           {m.role === "worker" && m.state && <StatusBadge {...(MACHINE_STATE[m.state] ?? MACHINE_STATE.pending)} />}
           <StatusBadge {...LEVEL[level]} />
           {m.health.brake && !stale && <StatusBadge label="freio ativo: novos casos aguardam" tone="fail" />}
+          {m.health.cpuCap != null && !m.health.brake && !stale && (
+            <StatusBadge label={`CPU alta: até ${m.health.cpuCap} caso(s) ao mesmo tempo`} tone="warn" />
+          )}
           <span className="text-muted-foreground ml-auto text-xs" data-testid="machine-age">
             {m.ageMs === null ? "sem dados" : stale ? `sem dados há ${Math.round(m.ageMs / 1000)} s` : "ao vivo"}
           </span>

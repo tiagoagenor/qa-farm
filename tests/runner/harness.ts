@@ -37,6 +37,10 @@ export async function makeHarness(opts: { emulators?: number; physical?: string[
     QAFARM_FAKE_IO_DELAY_MS: String(opts.ioDelayMs ?? 0),
     QAFARM_METRICS_INTERVAL_MS: "0",
     QAFARM_HEALTH_CLEAR_HOLD_MS: "0",
+    QAFARM_CPU_THROTTLE_HOT_MS: "0",
+    QAFARM_CPU_THROTTLE_COOL_MS: "0",
+    QAFARM_CPU_THROTTLE_CUT_EVERY_MS: "0",
+    QAFARM_CPU_THROTTLE_GROW_EVERY_MS: "0",
     QAFARM_MACHINE_ID: "server01",
   } as unknown as NodeJS.ProcessEnv)
   const p = dataPaths(dataDir)

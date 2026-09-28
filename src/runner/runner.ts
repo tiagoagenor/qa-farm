@@ -31,6 +31,7 @@ import {
   slotKey,
 } from "@/core/browserstack"
 import { InfraBreaker } from "@/core/infra-breaker"
+import { stepThrottle, throttleRoom, type ThrottleState } from "@/core/cpu-throttle"
 import { evaluateHealth, type HealthResult, type HealthState } from "@/core/health"
 import { type HostSample, MetricsFileSchema, MetricsHistory } from "@/core/metrics"
 import { parseMassa } from "@/core/massa"
@@ -160,6 +161,7 @@ export class Runner {
   private lastMetricsWrite = 0
   private lastHealthLevel: HealthResult["level"] = "ok"
   private lastBrakeLog = 0
+  private throttle: ThrottleState = { cap: null }
   private lastDeviceRefresh = 0
   private adbRaw = ""
   private catalog: Catalog | null = null
@@ -530,17 +532,38 @@ export class Runner {
     this.metricsHistory.add(sample)
     const h = evaluateHealth(sample, this.healthState, now, this.cfg.health)
     this.healthState = h.state
-    const wasBraking = this.health?.brake ?? false
-    this.health = h
     const crit = h.alerts.filter((a) => a.level === "crit").map((a) => a.message)
-    if (h.brake && !wasBraking) this.log(`saúde crítica (${crit.join("; ")}): novos casos aguardam`)
-    if (!h.brake && wasBraking) this.log("saúde normalizada: novos casos liberados")
+    // CPU: limite gradual (cpu-throttle.ts); o freio total fica para temperatura e swap
+    const wasHard = this.health?.hardBrake ?? false
+    this.health = h
+    if (h.hardBrake && !wasHard) this.log(`saúde crítica (${crit.join("; ")}): novos casos aguardam`)
+    if (!h.hardBrake && wasHard) this.log("saúde normalizada: novos casos liberados")
+    const t = stepThrottle(this.throttle, {
+      sample,
+      running: this.localRunning(),
+      devices: this.localDevices(),
+      now,
+    }, this.cfg.throttle)
+    this.throttle = t.state
+    if (t.change) this.log(t.change)
     const levelChanged = h.level !== this.lastHealthLevel
     this.lastHealthLevel = h.level
     if (levelChanged || now - this.lastMetricsWrite >= 5000) {
       this.lastMetricsWrite = now
       await this.writeMetrics()
     }
+  }
+
+  /** casos rodando em celulares deste servidor (fora workers e BrowserStack) */
+  private localRunning(): number {
+    return [...this.running.values()].filter((r) => !r.machineId && !r.cloud).length
+  }
+
+  /** celulares deste servidor que podem receber casos */
+  private localDevices(): number {
+    return [...this.devices.values()].filter(
+      (d) => !d.machineId && d.index && slotIdFromKey(d.serial) === null && d.enabled !== false,
+    ).length
   }
 
   private async writeMachinesStatus(): Promise<void> {
@@ -570,8 +593,8 @@ export class Runner {
             : null,
           history: this.metricsHistory.list(),
           health: h
-            ? { level: h.level, alerts: h.alerts, brake: h.brake, blockStart: h.blockStart }
-            : { level: "ok", alerts: [], brake: false, blockStart: false },
+            ? { level: h.level, alerts: h.alerts, brake: h.hardBrake, blockStart: h.blockStart, cpuCap: this.throttle.cap }
+            : { level: "ok", alerts: [], brake: false, blockStart: false, cpuCap: null },
         },
         ...this.remote.metricsEntries(),
       ],
@@ -1682,7 +1705,8 @@ export class Runner {
     // orçamento por máquina: saúde crítica (temperatura, swap trocando, CPU saturada) segura casos novos NAQUELA
     // máquina; os que estão rodando seguem. Worker também precisa estar online e com memória.
     const budget = new Map<string, number>()
-    if (this.health?.brake) {
+    budget.set("", throttleRoom(this.throttle, this.localRunning()))
+    if (this.health?.hardBrake) {
       budget.set("", 0)
       if (Date.now() - this.lastBrakeLog > 60_000) {
         this.lastBrakeLog = Date.now()

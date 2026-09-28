@@ -76,6 +76,8 @@ export interface HealthResult {
   alerts: Alert[]
   /** segura casos novos (temperatura, swap, CPU). Memória tem freio próprio no runner; disco só bloqueia ligar emuladores */
   brake: boolean
+  /** freio sem a CPU (temperatura, swap trocando): no mestre a CPU vira limite gradual (cpu-throttle.ts) */
+  hardBrake: boolean
   /** disco quase cheio: não ligar novos emuladores */
   blockStart: boolean
   state: HealthState
@@ -211,8 +213,9 @@ export function evaluateHealth(sample: HostSample, prev: HealthState, now: numbe
   }
   const level: HealthLevel = alerts.some((a) => a.level === "crit") ? "crit" : alerts.length ? "warn" : "ok"
   const brake = alerts.some((a) => a.level === "crit" && RULES.find((r) => r.id === a.id)!.brakes)
+  const hardBrake = alerts.some((a) => a.level === "crit" && a.id !== "cpu" && RULES.find((r) => r.id === a.id)!.brakes)
   const blockStart = alerts.some((a) => a.id === "disk" && a.level === "crit")
-  return { level, alerts, brake, blockStart, state }
+  return { level, alerts, brake, hardBrake, blockStart, state }
 }
 
 /** Configuração a partir do ambiente (QAFARM_HEALTH_TEMP_CRIT_C etc.); valores ausentes ficam no padrão. */
