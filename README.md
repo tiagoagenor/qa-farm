@@ -24,7 +24,7 @@ Navegador ─▶ Next.js (painel + API) ──comandos (JSON)──▶ Runner �
 
 ## Uso no server01
 
-Painel: **http://192.168.100.32:3000** (senha no `/home/server01/www/qa-farm/.env`, variável `QAFARM_PASSWORD`).
+Painel: **http://<IP do server01>:3000** (senha no `/home/server01/www/qa-farm/.env`, variável `QAFARM_PASSWORD`).
 
 ```bash
 /home/server01/www/qa-farm/scripts/ops/supervisor.sh status    # web e runner rodando?
