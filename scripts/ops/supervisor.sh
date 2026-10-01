@@ -25,9 +25,12 @@ RUN="$DATA/run"
 PORT="${PORT:-3000}"
 mkdir -p "$LOGS" "$RUN" "$DATA/state"
 
-# uma ação por vez: o "start" do cron espera um restart (deploy) terminar em vez de subir um segundo web
-exec 9>"$RUN/supervisor.lock"
-flock -w 180 9 || { echo "supervisor ocupado (outra ação em andamento)" >&2; exit 1; }
+# uma ação por vez: o "start" do cron espera um restart (deploy) terminar em vez de subir um segundo web.
+# Os processos iniciados não herdam a trava (9>&- em cada start); status só lê, não trava.
+if [ "${1:-start}" != status ]; then
+  exec 9>"$RUN/supervisor-acao.lock"
+  flock -w 180 9 || { echo "supervisor ocupado (outra ação em andamento)" >&2; exit 1; }
+fi
 
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 log() { echo "[$(ts)] $*" >> "$LOGS/supervisor.log"; }
@@ -59,7 +62,7 @@ start_web() {
   # painel anterior ainda soltando a porta (restart): espera até 10 s
   for _ in $(seq 1 20); do ss -ltnH "sport = :$PORT" 2>/dev/null | grep -q . || break; sleep 0.5; done
   log "subindo web na porta $PORT"
-  setsid nohup "$REPO/node_modules/.bin/next" start -H 0.0.0.0 -p "$PORT" >> "$LOGS/web.log" 2>&1 < /dev/null &
+  setsid nohup "$REPO/node_modules/.bin/next" start -H 0.0.0.0 -p "$PORT" >> "$LOGS/web.log" 2>&1 < /dev/null 9>&- &
   echo $! > "$RUN/web.pid"
 }
 
@@ -80,7 +83,7 @@ start_runner() {
     fi
   fi
   log "subindo runner"
-  setsid nohup flock -n "$DATA/state/runner.flock" node "$REPO/dist/runner.mjs" >> "$LOGS/runner.log" 2>&1 < /dev/null &
+  setsid nohup flock -n "$DATA/state/runner.flock" node "$REPO/dist/runner.mjs" >> "$LOGS/runner.log" 2>&1 < /dev/null 9>&- &
   echo $! > "$RUN/runner.pid"
 }
 
@@ -88,7 +91,7 @@ start_screen() { # tela ao vivo (scrcpy no painel); se cair, o resto do painel s
   alive "$RUN/screen.pid" "screen.mjs" && return 0
   [ -f "$REPO/dist/screen.mjs" ] || return 0
   log "subindo serviço de tela na porta ${QAFARM_SCREEN_PORT:-3001}"
-  setsid nohup node "$REPO/dist/screen.mjs" >> "$LOGS/screen.log" 2>&1 < /dev/null &
+  setsid nohup node "$REPO/dist/screen.mjs" >> "$LOGS/screen.log" 2>&1 < /dev/null 9>&- &
   echo $! > "$RUN/screen.pid"
 }
 
