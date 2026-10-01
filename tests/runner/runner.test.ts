@@ -348,6 +348,7 @@ describe("runner (modo fake)", () => {
     await h.world((w) => {
       w.devices = w.devices.filter((d) => d.kind === "physical")
     }) // tira o emulador: o caso tem que ir para o físico
+    await h.tickUntil(() => !h.runner.snapshotForTests().devices.some((d) => d.serial === "emulator-5554" && d.state === "ready") || undefined)
     const ids = await h.catalogIds((n) => n === "CT_LOGIN_05-Caso-SLOW-PASS")
     const created = await h.command({ type: "create_queue", input: queueInput(ids) })
     await h.tickUntil(() => h.runner.snapshotForTests().running[0]?.serial === "FAKE-PHYSICAL-01" || undefined)

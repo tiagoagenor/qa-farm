@@ -1631,7 +1631,9 @@ export class Runner {
         next.set(serial, { ...d, note: `Pausado: erros de infraestrutura seguidos (volta às ${hhmm})` })
       }
     }
-    this.devices = next
+    // ordem estável (a do adb), não a ordem em que as conferências assíncronas terminaram
+    const order = new Map(parsed.map((d, i) => [d.serial, i]))
+    this.devices = new Map([...next].sort((a, b) => (order.get(a[0]) ?? Infinity) - (order.get(b[0]) ?? Infinity)))
     const appiumReady: Record<string, boolean> = {}
     for (const d of next.values())
       if (d.index) appiumReady[d.serial] = d.state === "ready" || d.state === "busy"
