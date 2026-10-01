@@ -10,6 +10,8 @@ export interface Adb {
   devicesRaw(): Promise<string>
   bootCompleted(serial: string): Promise<boolean>
   versionCode(serial: string, pkg: string): Promise<number | undefined>
+  /** md5 do base.apk instalado (undefined se não der para ler): mesmo versionCode pode ser outro build. */
+  apkMd5(serial: string, pkg: string): Promise<string | undefined>
   /**
    * Instala/atualiza o APK, inclusive versão mais antiga (-d). Se o Android ainda recusar (versão mais nova ou
    * assinatura diferente) e `allowUninstall`, desinstala e instala de novo (apaga os dados do app — só emulador).
@@ -44,6 +46,11 @@ export function realAdb(cfg: Config): Adb {
       const r = await run(adb, ["-s", serial, "shell", "dumpsys", "package", pkg], { timeoutMs: 20_000 })
       const m = /versionCode=(\d+)/.exec(r.stdout)
       return m ? Number(m[1]) : undefined
+    },
+    async apkMd5(serial, pkg) {
+      const script = `p=$(pm path ${pkg} | grep base.apk | head -1 | cut -d: -f2); [ -n "$p" ] && md5sum "$p"`
+      const r = await run(adb, ["-s", serial, "shell", script], { timeoutMs: 60_000 })
+      return /^([0-9a-f]{32})\s/.exec(r.stdout.trim())?.[1]
     },
     async install(serial, apk, pkg, _versionCode, opts) {
       const attempt = async () => {
@@ -96,6 +103,9 @@ export function fakeAdb(cfg: Config): Adb {
     async versionCode(serial, pkg) {
       return (await readWorld(dir)).devices.find((x) => x.serial === serial)?.installed[pkg]
     },
+    async apkMd5(serial, pkg) {
+      return (await readWorld(dir)).devices.find((x) => x.serial === serial)?.apkMd5?.[pkg]
+    },
     async install(serial, _apk, pkg, versionCode, opts) {
       const w = await readWorld(dir)
       await sleep(w.installDelayMs)
@@ -110,6 +120,7 @@ export function fakeAdb(cfg: Config): Adb {
           return
         }
         d.installed[pkg] = versionCode
+        if (d.apkMd5) delete d.apkMd5[pkg] // build novo: o md5 de verdade o modo simulado não conhece
         d.installs = (d.installs ?? 0) + 1
         output = "Success"
       })

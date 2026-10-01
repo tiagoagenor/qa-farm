@@ -129,21 +129,21 @@ export async function startScreenServer(o: ScreenServerOptions) {
     if (!parsed.machineId)
       return {
         ep: { host: "127.0.0.1", port: o.adbPort ?? ADB_SERVER_PORT, serial: key },
-        busy: d.state === "busy",
+        busy: d.state === "busy" || d.state === "reserved",
       }
     const m = file.machines.find((x) => x.id === parsed.machineId)!
     if (m.transport !== "ssh" && !o.source.fake) return { error: "Máquina sem túnel SSH" }
     return {
       ep: { host: "127.0.0.1", port: localPorts(m.slot).adb, serial: parsed.serial },
-      busy: d.state === "busy",
+      busy: d.state === "busy" || d.state === "reserved",
     }
   }
 
-  /** Emulador sem teste rodando volta a dormir quando ninguém mais assiste (físico e em teste ficam como estão). */
+  /** Emulador sem teste rodando volta a dormir quando ninguém mais assiste (físico, em teste e reservado ficam como estão). */
   const sleepIfIdle = async (key: string, s: ScreenStream) => {
     const devices = await readJson(p.devicesState, DevicesStateSchema.nullable(), null)
     const d = devices?.devices.find((x) => x.serial === key)
-    if (d?.kind === "emulator" && d.state !== "busy") await s.sleep()
+    if (d?.kind === "emulator" && d.state !== "busy" && d.state !== "reserved") await s.sleep()
   }
 
   const stopStream = (ds: DeviceStream, code: number, reason: string) => {

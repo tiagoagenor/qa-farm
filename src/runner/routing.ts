@@ -26,6 +26,10 @@ export function routedAdb(local: Adb, remote: RemoteMachines): Adb {
       const r = route(key)
       return r.machineId ? clientOf(remote, r.machineId).versionCode(r.serial, pkg) : local.versionCode(key, pkg)
     },
+    async apkMd5(key, pkg) {
+      const r = route(key)
+      return r.machineId ? undefined : local.apkMd5(key, pkg) // worker: só pelo versionCode (sem rota no agente)
+    },
     async install(key, apk, pkg, versionCode, opts) {
       const r = route(key)
       if (!r.machineId) return local.install(key, apk, pkg, versionCode, opts)

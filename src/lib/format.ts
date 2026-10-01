@@ -28,6 +28,7 @@ export const DEVICE_STATE: Record<DeviceState, { label: string; tone: Tone }> = 
   busy: { label: "Ocupado", tone: "run" },
   maintenance: { label: "Manutenção", tone: "warn" },
   external: { label: "Externo", tone: "muted" },
+  reserved: { label: "Reservado", tone: "info" },
 }
 
 export const TONE_CLASS: Record<Tone, string> = {

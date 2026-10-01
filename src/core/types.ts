@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { GiatEnvSchema } from "./giat"
 import { BranchNameSchema } from "./project-git"
 
 // ---------------------------------------------------------------- apps ---
@@ -151,6 +152,8 @@ export const DEVICE_STATES = [
   "busy",
   "maintenance",
   "external",
+  /** reservado para o GI-App-Test: fora das filas, a fazenda não instala nem mexe na tela */
+  "reserved",
 ] as const
 export const DeviceStateSchema = z.enum(DEVICE_STATES)
 export type DeviceState = z.infer<typeof DeviceStateSchema>
@@ -294,6 +297,15 @@ export const CommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("restart_appiums") }),
   z.object({ type: z.literal("delete_app"), appId: z.string() }),
   z.object({ type: z.literal("refresh_catalog") }),
+  z.object({ type: z.literal("giat_reserve"), serial: z.string().min(1).max(100) }),
+  z.object({ type: z.literal("giat_release"), serial: z.string().min(1).max(100) }),
+  z.object({
+    type: z.literal("giat_run"),
+    serial: z.string().min(1).max(100),
+    test: z.string().min(1).max(300),
+    env: GiatEnvSchema.default("HML"),
+  }),
+  z.object({ type: z.literal("giat_cancel"), runId: z.string().min(1).max(80) }),
 ])
 export type Command = z.infer<typeof CommandSchema>
 export type CommandType = Command["type"]

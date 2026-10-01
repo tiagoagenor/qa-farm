@@ -32,6 +32,7 @@ import {
 } from "@/core/browserstack"
 import { InfraBreaker } from "@/core/infra-breaker"
 import { stepThrottle, throttleRoom, type ThrottleState } from "@/core/cpu-throttle"
+import { Giat } from "./giat"
 import { evaluateHealth, type HealthResult, type HealthState } from "@/core/health"
 import { type HostSample, MetricsFileSchema, MetricsHistory } from "@/core/metrics"
 import { parseMassa } from "@/core/massa"
@@ -143,6 +144,8 @@ export class Runner {
   /** última falha de instalação por celular: não tenta de novo a cada ciclo (e mostra o motivo no cartão) */
   private installFailures = new Map<string, { versionCode: number; at: number; note: string }>()
   private prepared = new Set<string>() // celulares já configurados para testes (diálogos de erro desligados)
+  private apkChecked = new Map<string, string>() // serial → appId cujo APK instalado já foi conferido pelo md5
+  private installedBy = new Map<string, string>() // serial → appId que a fazenda instalou por último
   private physical = new Map<string, number>() // aparelhos físicos ativados: serial → índice fixo
   private disabledEmulators = new Set<string>() // emuladores ligados mas fora do conjunto de testes
   private maintenance = new Map<number, { since: string; reason: string }>()
@@ -162,6 +165,7 @@ export class Runner {
   private lastHealthLevel: HealthResult["level"] = "ok"
   private lastBrakeLog = 0
   private throttle: ThrottleState = { cap: null }
+  private giat: Giat
   private lastDeviceRefresh = 0
   private adbRaw = ""
   private catalog: Catalog | null = null
@@ -212,6 +216,7 @@ export class Runner {
   ) {
     this.p = dataPaths(cfg.dataDir)
     this.remote = new RemoteMachines(cfg, this.p, log)
+    this.giat = new Giat(cfg, this.p, log)
     this.adb = routedAdb(ad.adb, this.remote)
     this.appium = routedAppium(ad.appium, this.remote)
     this.remote.onReboot = (id) => this.forgetMachine(id)
@@ -302,6 +307,7 @@ export class Runner {
       this.queues.set(fixed.id, fixed)
       if (fixed !== original) this.persistQueue(fixed.id)
     }
+    await this.giat.load()
     const desired = await readJson(this.p.desired, DesiredSchema, { devices: 0 })
     this.desired = desired.devices
     await this.remote.load(desired.machines ?? {})
@@ -349,6 +355,7 @@ export class Runner {
       await this.processRemoteCleanup()
       if (Date.now() - this.lastGitStatus > 60_000) void this.refreshGitState()
       await this.collectMetrics()
+      await this.giat.tick()
       await this.dispatch()
       await this.writeRunnerState()
       await this.writeMachinesStatus()
@@ -361,6 +368,7 @@ export class Runner {
 
   async shutdown(): Promise<void> {
     this.remote.shutdown()
+    await this.giat.shutdown()
     await this.writeRunnerState()
     await Promise.all([...this.writeChains.values()])
   }
@@ -1131,6 +1139,8 @@ export class Runner {
         }
         if ([...this.running.values()].some((r) => !r.machineId))
           return { ok: false, message: "Há casos em execução. Pause ou cancele as filas antes." }
+        if (this.giat.reservedSerials().some((s) => s.startsWith("emulator-")))
+          return { ok: false, message: "Há emuladores reservados para o GI-App-Test. Libere-os antes." }
         this.desired = 0
         await this.saveDesired()
         this.farmOps = [{ kind: "stopAll" }]
@@ -1143,6 +1153,8 @@ export class Runner {
         const d = this.devices.get(c.serial)
         if (!d || d.kind !== "emulator" || !d.index)
           return { ok: false, message: "Só é possível reiniciar emuladores da fazenda" }
+        if (this.giat.reserved(c.serial))
+          return { ok: false, message: "Celular reservado para o GI-App-Test: libere antes" }
         if ([...this.running.values()].some((r) => r.serial === c.serial))
           return { ok: false, message: "Celular ocupado com um caso" }
         this.restartDevice(d.index, "reinício pedido pelo usuário")
@@ -1311,6 +1323,32 @@ export class Runner {
         void this.refreshCatalog(true)
         return { ok: true, message: "Atualizando catálogo" }
       }
+      case "giat_reserve": {
+        const d = this.devices.get(c.serial)
+        if (!d || d.machineId || (d.kind !== "emulator" && d.kind !== "physical"))
+          return { ok: false, message: "Só celulares deste servidor podem ser reservados" }
+        const r = await this.giat.reserve(c.serial)
+        this.lastDeviceRefresh = 0
+        return r
+      }
+      case "giat_release": {
+        const r = await this.giat.release(c.serial)
+        if (r.ok) {
+          // a fazenda confere de novo o app instalado e prepara o celular antes de usá-lo
+          this.appVersions.delete(c.serial)
+          this.apkChecked.delete(c.serial)
+          this.installedBy.delete(c.serial)
+          this.prepared.delete(c.serial)
+          this.lastDeviceRefresh = 0
+        }
+        return r
+      }
+      case "giat_run": {
+        const d = this.devices.get(c.serial)
+        return this.giat.start(c.serial, c.test, c.env, d?.state === "reserved" && d.adbState === "device")
+      }
+      case "giat_cancel":
+        return this.giat.cancel(c.runId)
     }
   }
 
@@ -1406,6 +1444,17 @@ export class Runner {
         updatedAt: now,
       }
       const isPhysical = d.kind === "physical"
+      if (!d.machineId && this.giat.reserved(d.serial) && !busyBySerial.has(d.serial)) {
+        // GI-App-Test: fora das filas; a fazenda não instala, não prepara e não apaga a tela
+        const gr = this.giat.activeRun(d.serial)
+        if (isPhysical) Object.assign(base, { name: d.model ?? d.serial })
+        next.set(d.serial, {
+          ...base,
+          state: d.adbState === "device" ? "reserved" : base.qemuPid ? "booting" : "offline",
+          note: gr ? `GI-App-Test: rodando ${gr.test}` : "Reservado para o GI-App-Test",
+        })
+        continue
+      }
       if (isPhysical && d.machineId) {
         next.set(d.serial, {
           ...base,
@@ -1470,12 +1519,25 @@ export class Runner {
               this.appVersions.set(d.serial, await this.adb.versionCode(d.serial, meta.package))
             }
             const vc = this.appVersions.get(d.serial)
-            if (vc !== meta.versionCode) {
+            // mesmo versionCode pode ser outro build (ex.: sem os ids): confere o md5 do base.apk uma vez por app
+            let otherBuild = false
+            if (vc === meta.versionCode && meta.md5 && this.apkChecked.get(d.serial) !== meta.id) {
+              const md5 = await this.adb.apkMd5(d.serial, meta.package)
+              if (md5 && md5 !== meta.md5 && this.installedBy.get(d.serial) !== meta.id) otherBuild = true
+              else {
+                if (md5 && md5 !== meta.md5)
+                  this.log(`${d.serial}: md5 do app instalado difere do enviado mesmo após instalar — seguindo pelo versionCode`)
+                this.apkChecked.set(d.serial, meta.id)
+              }
+            }
+            if (vc !== meta.versionCode || otherBuild) {
               const failed = this.installFailures.get(d.serial)
               const recent =
                 failed && failed.versionCode === meta.versionCode && Date.now() - failed.at < INSTALL_RETRY_MS
               if (!recent) this.startInstall(d.serial, meta, isPhysical)
-              const note = recent ? failed.note : `Instalando ${meta.versionName} (${meta.versionCode})`
+              const note = recent
+                ? failed.note
+                : `Instalando ${meta.versionName} (${meta.versionCode})${otherBuild ? " — havia outro build com o mesmo versionCode" : ""}`
               next.set(d.serial, { ...base, state: "installing", appVersionCode: vc, note })
               return
             }
@@ -1594,7 +1656,11 @@ export class Runner {
     void this.adb
       .install(serial, apk, meta.package, meta.versionCode, { allowUninstall: !physical })
       .then(async (r) => {
-        if (r.ok) this.installFailures.delete(serial)
+        if (r.ok) {
+          this.installFailures.delete(serial)
+          this.installedBy.set(serial, meta.id)
+          this.apkChecked.delete(serial)
+        }
         else {
           this.log(`falha ao instalar em ${serial}: ${r.output.slice(-300)}`)
           const note =

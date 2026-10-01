@@ -38,6 +38,10 @@ export function dataPaths(dataDir: string) {
     runnerLock: path.join(dataDir, "state", "runner.lock"),
     logs: path.join(dataDir, "logs"),
     appiumLog: (serial: string) => path.join(dataDir, "logs", `appium-${serial}.log`),
+    giatState: path.join(dataDir, "state", "giat.json"),
+    giatRuns: path.join(dataDir, "giat"),
+    giatRun: (id: string) => path.join(dataDir, "giat", id),
+    giatAppiumLog: path.join(dataDir, "logs", "giat-appium.log"),
   }
 }
 export type DataPaths = ReturnType<typeof dataPaths>

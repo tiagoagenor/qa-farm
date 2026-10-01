@@ -14,6 +14,7 @@ const FakeDeviceSchema = z.object({
   bootAt: z.number(),
   pid: z.number().optional(),
   installed: z.record(z.string(), z.number()),
+  apkMd5: z.record(z.string(), z.string()).optional(), // md5 do base.apk instalado (simula outro build)
   dialog: z.string().optional(), // janela de erro simulada (ex.: "Application Not Responding: com.android.systemui")
   settings: z.record(z.string(), z.string()).optional(),
   forceStops: z.array(z.string()).optional(), // pacotes fechados com am force-stop

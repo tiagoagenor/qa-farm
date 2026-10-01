@@ -53,6 +53,8 @@ export interface Config {
   health: HealthConfig
   /** limite gradual de casos por CPU no mestre */
   throttle: ThrottleConfig
+  /** projeto GI-App-Test (QA_Automacao_TESTE); o recurso só aparece se existir run.mjs nele */
+  giatDir: string
 }
 
 function num(v: string | undefined, fallback: number): number {
@@ -104,5 +106,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     metricsIntervalMs: num(env.QAFARM_METRICS_INTERVAL_MS, 2000),
     health: { ...healthConfigFromEnv(env), memCritMb: num(env.QAFARM_MIN_FREE_MEM_MB, 1500) },
     throttle: throttleConfigFromEnv(env),
+    giatDir: env.QAFARM_GIAT_DIR ?? path.join(home, "www/QA_Automacao_TESTE"),
   }
 }
