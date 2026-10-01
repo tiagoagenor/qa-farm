@@ -25,6 +25,10 @@ RUN="$DATA/run"
 PORT="${PORT:-3000}"
 mkdir -p "$LOGS" "$RUN" "$DATA/state"
 
+# uma ação por vez: o "start" do cron espera um restart (deploy) terminar em vez de subir um segundo web
+exec 9>"$RUN/supervisor.lock"
+flock -w 180 9 || { echo "supervisor ocupado (outra ação em andamento)" >&2; exit 1; }
+
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 log() { echo "[$(ts)] $*" >> "$LOGS/supervisor.log"; }
 
@@ -45,6 +49,15 @@ rotate_logs() { # mantém cada log com no máximo ~50 MB (preserva os últimos 1
 
 start_web() {
   alive "$RUN/web.pid" "next-server|next start" && return 0
+  # já existe um painel NOSSO ouvindo na porta (pid gravado errado): adota em vez de subir outro
+  local p
+  p=$(ss -ltnpH "sport = :$PORT" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+  if [ -n "$p" ] && [ "$(ps -o user= -p "$p" 2>/dev/null)" = "$(id -un)" ] && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -Eq "next-server|next start"; then
+    echo "$p" > "$RUN/web.pid"
+    return 0
+  fi
+  # painel anterior ainda soltando a porta (restart): espera até 10 s
+  for _ in $(seq 1 20); do ss -ltnH "sport = :$PORT" 2>/dev/null | grep -q . || break; sleep 0.5; done
   log "subindo web na porta $PORT"
   setsid nohup "$REPO/node_modules/.bin/next" start -H 0.0.0.0 -p "$PORT" >> "$LOGS/web.log" 2>&1 < /dev/null &
   echo $! > "$RUN/web.pid"
