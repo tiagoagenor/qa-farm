@@ -99,6 +99,17 @@ export interface GiatJsonResult {
   error?: string
   shot?: string
   log?: string
+  /** passo em que o teste parou (o texto já vem com as senhas mascaradas pelo GI-App-Test) */
+  failedAt?: { file?: string; line?: number; source?: string } | null
+}
+
+/** Erro + onde parou: "<erro>\nPasso: login-sucesso.mjs:39 — await app.tap(...)". */
+function failureText(r: GiatJsonResult | undefined): string | undefined {
+  const err = r?.error?.trim()
+  const at = r?.failedAt
+  if (!at?.file && !at?.source) return err
+  const where = `Passo: ${at.file ? `${at.file.split("/").pop()}${at.line ? `:${at.line}` : ""}` : ""}${at.source ? `${at.file ? " — " : ""}${at.source.trim()}` : ""}`
+  return err ? `${err}\n${where}` : where
 }
 
 /**
@@ -113,7 +124,7 @@ export function classifyGiat(o: {
   results: GiatJsonResult[]
   screenshots: string[]
 }): RunResult {
-  const err = o.results.find((r) => !r.ok)?.error?.trim()
+  const err = failureText(o.results.find((r) => !r.ok))
   const base = { screenshots: o.screenshots, hasOutputXml: false, exitCode: o.exitCode }
   if (o.canceled) return { ...base, status: "canceled", message: "Cancelado" }
   if (o.deviceLost) return { ...base, status: "infra_error", message: "Celular caiu durante o caso" }

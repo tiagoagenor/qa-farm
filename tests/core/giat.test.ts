@@ -82,4 +82,19 @@ describe("GI-App-Test", () => {
     expect(st.map((x) => x[0])).toEqual(["passed", "failed", "infra_error", "config_error", "infra_error", "timeout", "canceled"])
     expect(st[1][1]).toBe("Elemento não apareceu")
   })
+
+  it("falha mostra o erro e o passo onde parou (arquivo:linha — código)", () => {
+    // Arrange
+    const results = [{ ok: false, error: "elemento não apareceu", failedAt: { file: "tests/autenticacao/login/login-sucesso.mjs", line: 39, source: "await app.tap(tela.acessarMinhaConta(app));" } }]
+
+    // Act
+    const r = classifyGiat({ exitCode: 1, canceled: false, timedOut: false, deviceLost: false, screenshots: ["x.png"], results })
+
+    // Assert
+    expect([r.status, r.message, r.screenshots]).toEqual([
+      "failed",
+      "elemento não apareceu\nPasso: login-sucesso.mjs:39 — await app.tap(tela.acessarMinhaConta(app));",
+      ["x.png"],
+    ])
+  })
 })
