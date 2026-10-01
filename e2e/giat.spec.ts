@@ -42,6 +42,8 @@ test("fila do GI-App-Test: seleciona as pastas, escolhe o ambiente e roda como o
   await expect(page.getByText(/GI-App-Test · Criada .* ambiente PROD/)).toBeVisible()
   await expect(page.getByTestId("queue-progress")).toContainText("5 de 5 concluído(s)", { timeout: 90_000 })
   await expect(page.getByRole("tab", { name: "Passou (3)" })).toBeVisible()
+  await expect(page.getByTestId("item-row")).toHaveCount(5) // casos aparecem abertos nas pastas, com o celular
+  await expect(page.locator('[data-testid="item-row"][data-status="passed"]')).toHaveCount(3)
   await expect(page.getByRole("tab", { name: "Falhas (2)" })).toBeVisible()
   const id = page.url().split("/filas/")[1]
   const q = (await (await page.request.get(`/api/queues/${id}`)).json()) as { queue?: { items: Array<{ attempts: Array<{ dir: string }> }> }; items?: Array<{ attempts: Array<{ dir: string }> }> }

@@ -218,7 +218,7 @@ function ItemRow({
           {it.name}
         </p>
         {!indent && (
-          <p className="text-muted-foreground truncate text-xs">{it.file.replace(/^scenarios\//, "")}</p>
+          <p className="text-muted-foreground truncate text-xs">{it.file.replace(/^(scenarios|tests)\//, "")}</p>
         )}
       </TableCell>
     ),

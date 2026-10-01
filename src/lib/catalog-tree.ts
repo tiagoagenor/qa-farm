@@ -26,12 +26,13 @@ function newFolder<E extends TreeEntry>(name: string, path: string): Folder<E> {
 function build<E extends TreeEntry>(entries: E[]): Folder<E> {
   const root = newFolder<E>(ROOT, ROOT)
   for (const e of entries) {
-    const parts = e.folder.split("/").slice(1) // sem o "scenarios"
+    // a 1ª pasta é a raiz do projeto (scenarios no Robot, tests no GI-App-Test): não aparece, mas entra na chave
+    const all = e.folder.split("/")
     let cur = root
-    for (const p of parts) {
-      if (!cur.folders.has(p)) cur.folders.set(p, newFolder<E>(p, `${cur.path}/${p}`))
+    all.slice(1).forEach((p, i) => {
+      if (!cur.folders.has(p)) cur.folders.set(p, newFolder<E>(p, all.slice(0, i + 2).join("/")))
       cur = cur.folders.get(p)!
-    }
+    })
     const list = cur.files.get(e.file) ?? []
     list.push(e)
     cur.files.set(e.file, list)

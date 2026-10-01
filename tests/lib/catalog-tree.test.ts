@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import { giatEntry } from "@/core/giat"
 import { allGroupKeys, buildTreeRows, groupCheck, toggleGroup, type TreeRow } from "@/lib/catalog-tree"
 import { entry } from "../helpers/builders"
 
@@ -111,5 +112,23 @@ describe("groupCheck / toggleGroup", () => {
 
     // Assert
     expect([...next]).toEqual(["x"])
+  })
+
+  it("projeto com raiz tests/ (GI-App-Test): expandir tudo abre as pastas e mostra os casos", () => {
+    // Arrange
+    const es = ["login-valido", "login-senha-invalida"].map((n) => giatEntry(`autenticacao/login/${n}.mjs`))
+
+    // Act
+    const rows = buildTreeRows(es, new Set(allGroupKeys(es)))
+
+    // Assert
+    expect(rows.map((r) => [r.kind, r.kind === "test" ? r.entry.id : r.key])).toEqual([
+      ["folder", "tests/autenticacao"],
+      ["folder", "tests/autenticacao/login"],
+      ["file", "tests/autenticacao/login/login-senha-invalida.mjs"],
+      ["test", "giat:autenticacao/login/login-senha-invalida.mjs"],
+      ["file", "tests/autenticacao/login/login-valido.mjs"],
+      ["test", "giat:autenticacao/login/login-valido.mjs"],
+    ])
   })
 })
