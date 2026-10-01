@@ -211,14 +211,17 @@ export class Giat {
     if (raw) {
       files.push("result.json")
       try {
-        const data = JSON.parse(raw) as { tests?: Array<{ ok?: boolean; log?: string; shot?: string }> }
-        const tests = Array.isArray(data.tests) ? data.tests : []
+        type T = { ok?: boolean; log?: string; shot?: string }
+        const data = JSON.parse(raw) as { results?: T[]; tests?: T[] }
+        const tests = Array.isArray(data.results) ? data.results : Array.isArray(data.tests) ? data.tests : []
         r.summary = { total: tests.length, passed: tests.filter((t) => t.ok).length, failed: tests.filter((t) => !t.ok).length }
+        const base = await fsp.realpath(this.cfg.giatDir)
         for (const t of tests) {
           for (const f of [t.log, t.shot]) {
             if (typeof f !== "string" || !f) continue
-            const src = path.resolve(this.cfg.giatDir, f)
-            if (!src.startsWith(path.resolve(this.cfg.giatDir) + path.sep)) continue
+            // só arquivos de dentro do projeto (caminho real: link simbólico para fora não passa)
+            const src = await fsp.realpath(path.resolve(this.cfg.giatDir, f)).catch(() => null)
+            if (!src || !src.startsWith(base + path.sep)) continue
             const name = path.basename(src).replace(/[^\w.-]/g, "_")
             if (await fsp.copyFile(src, path.join(this.p.giatRun(r.id), name)).then(() => true, () => false)) files.push(name)
           }

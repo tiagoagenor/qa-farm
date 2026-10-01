@@ -35,7 +35,7 @@ if (!(process.env.GIAT_ALLOWED_DEVICES || "").split(",").includes(serial)) proce
 fs.mkdirSync("logs/smoke", { recursive: true })
 fs.writeFileSync("logs/smoke/r.json", JSON.stringify({ leak: "QAFARM_GIAT_LEAK" in process.env }))
 const ok = !a[0].includes("FAIL")
-fs.writeFileSync(json, JSON.stringify({ tests: [{ rel: a[0], ok, log: "logs/smoke/r.json" }] }))
+fs.writeFileSync(json, JSON.stringify({ passed: ok ? 1 : 0, failed: ok ? 0 : 1, results: [{ rel: a[0], ok, log: process.cwd() + "/logs/smoke/r.json" }] }))
 console.log("rodou", a[0], "em", serial)
 process.exit(ok ? 0 : 1)
 `,
