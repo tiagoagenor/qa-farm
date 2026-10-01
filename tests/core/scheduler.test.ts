@@ -193,4 +193,20 @@ describe("schedule", () => {
     // Assert
     expect(result.map((a) => a.serial)).toEqual(["server02:emulator-5554"])
   })
+
+  it("fila do GI-App-Test só usa celulares do mestre: worker e BrowserStack ficam para o Robot", () => {
+    // Arrange
+    const giat = { ...queue([item("A"), item("B"), item("C")]), id: "q-giat", project: "giat" as const }
+    const livres = [
+      { ...device("emulator-5554"), machineId: "server02" },
+      { ...device("browserstack:1"), machineId: "browserstack" },
+      device("emulator-5556"),
+    ]
+
+    // Act
+    const result = schedule([giat], livres, [])
+
+    // Assert
+    expect(result.map((a) => [a.itemId, a.serial])).toEqual([["A", "emulator-5556"]])
+  })
 })

@@ -1,6 +1,6 @@
 "use client"
 
-import { AlertTriangle, Boxes, FlaskConical, GitBranch, ListChecks, LogOut, Moon, Package, Server, Smartphone, Sun } from "lucide-react"
+import { AlertTriangle, Boxes, GitBranch, ListChecks, LogOut, Moon, Package, Server, Smartphone, Sun } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
@@ -50,7 +50,6 @@ const NAV = [
   { href: "/maquinas", label: "Máquinas", icon: Server, badge: () => null },
   { href: "/apps", label: "Apps", icon: Package, badge: () => null },
   { href: "/projeto", label: "Projeto", icon: GitBranch, badge: () => null },
-  { href: "/gi-app-test", label: "GI-App-Test", icon: FlaskConical, badge: () => null },
 ]
 
 /** Ponto de alerta no menu: vermelho = alguma máquina crítica; amarelo = atenção. */

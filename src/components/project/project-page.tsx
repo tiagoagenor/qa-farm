@@ -1,6 +1,8 @@
 "use client"
 
 import { Download, GitBranch, Loader2, RefreshCw } from "lucide-react"
+import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
@@ -21,7 +23,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { type Project, PROJECT_LABEL } from "@/core/giat"
 import type { ProjectGitState } from "@/core/project-git"
+import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { sendCommand } from "@/lib/client"
 import { formatDateTime } from "@/lib/format"
@@ -45,9 +49,35 @@ interface Pending {
 
 /** Página Projeto: branch/commit do projeto Robot no servidor, atualizar (pull) escolhendo a branch e ver o código. */
 export function ProjectPage() {
+  const project: Project = useSearchParams().get("projeto") === "giat" ? "giat" : "robot"
+  return <ProjectView key={project} project={project} />
+}
+
+/** Robot | GI-App-Test no topo da página. */
+function ProjectSwitch({ project }: { project: Project }) {
+  return (
+    <div className="bg-muted mb-4 inline-flex rounded-lg p-1" data-testid="project-switch">
+      {(["robot", "giat"] as const).map((p) => (
+        <Link
+          key={p}
+          href={p === "giat" ? "/projeto?projeto=giat" : "/projeto"}
+          className={cn(
+            "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+            p === project ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+          )}
+          data-testid={`project-switch-${p}`}
+        >
+          {PROJECT_LABEL[p]}
+        </Link>
+      ))}
+    </div>
+  )
+}
+
+function ProjectView({ project }: { project: Project }) {
   const [pending, setPending] = useState<Pending | null>(null)
   const [fast, setFast] = useState(false)
-  const { data, reload } = usePoll<ProjectDto>("/api/project", fast ? 1000 : 10_000)
+  const { data, reload } = usePoll<ProjectDto>(`/api/project?project=${project}`, fast ? 1000 : 10_000)
   const st = data?.state
   const op = st?.op
   const running = op?.status === "running"
@@ -74,18 +104,19 @@ export function ProjectPage() {
       sinceOpId: op?.id,
     })
     // o runner só confirma que começou: o aviso de sucesso vem quando terminar de verdade
-    const r = await sendCommand(cmd, { quiet: true })
+    const r = await sendCommand({ ...cmd, project }, { quiet: true })
     if (!r?.ok) setPending(null)
     void reload()
   }
 
   return (
     <div>
+      <ProjectSwitch project={project} />
       <PageHeader
         title="Projeto"
         description={
           <>
-            Código do projeto Robot usado nos testes
+            Código do {PROJECT_LABEL[project]} usado nos testes
             {st?.remoteUrl ? (
               <>
                 {" "}
@@ -116,13 +147,14 @@ export function ProjectPage() {
               busy={busy}
               pending={pending}
               onStart={start}
+              project={project}
               onChanged={() => void reload()}
             />
             {pending && !current ? <OpStarting pending={pending} /> : op && <OpLog op={op} />}
             <Commits title="Últimos commits no servidor" commits={st.commits ?? []} testid="commits" />
           </TabsContent>
           <TabsContent value="codigo" className="pt-2">
-            <CodeBrowser version={st.head?.hash ?? ""} />
+            <CodeBrowser version={st.head?.hash ?? ""} project={project} />
           </TabsContent>
         </Tabs>
       )}
@@ -185,12 +217,14 @@ function UpdateCard({
   busy,
   pending,
   onStart,
+  project,
   onChanged,
 }: {
   st: ProjectGitState
   busy: boolean
   pending: Pending | null
   onStart: (cmd: GitCommand) => Promise<void>
+  project: Project
   onChanged: () => void
 }) {
   const running = (kind: Pending["kind"]) =>
@@ -204,7 +238,7 @@ function UpdateCard({
 
   async function pick(b: string) {
     setBranch(b)
-    await sendCommand({ type: "project_preview", branch: b }, { quiet: true })
+    await sendCommand({ type: "project_preview", branch: b, project }, { quiet: true })
     onChanged()
   }
 

@@ -21,6 +21,7 @@ const env = {
   QAFARM_FAKE_SPEED: process.env.QAFARM_FAKE_SPEED ?? "0.4",
   QAFARM_MACHINE_ID: "server01",
   QAFARM_HEALTH_CLEAR_HOLD_MS: "0",
+  QAFARM_GIAT_DIR: path.join(root, "tests/fixtures/fake-giat"),
 }
 if (process.env.E2E_SKIP_BUILD !== "1") {
   execFileSync(bin("next"), ["build"], { cwd: root, stdio: "inherit", env })

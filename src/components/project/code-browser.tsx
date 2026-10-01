@@ -23,7 +23,7 @@ interface FileDto {
 }
 
 /** Visualizador SOMENTE LEITURA do código do projeto no servidor (segredos aparecem como ••••). */
-export function CodeBrowser({ version }: { version: string }) {
+export function CodeBrowser({ version, project = "robot" }: { version: string; project?: "robot" | "giat" }) {
   const [children, setChildren] = useState<Record<string, Entry[]>>({})
   const [open, setOpen] = useState<Set<string>>(new Set([""]))
   const [file, setFile] = useState<FileDto | null>(null)
@@ -31,12 +31,12 @@ export function CodeBrowser({ version }: { version: string }) {
 
   const load = useCallback(async (dir: string) => {
     try {
-      const r = await getJson<{ entries: Entry[] }>(`/api/project/tree?path=${encodeURIComponent(dir)}`)
+      const r = await getJson<{ entries: Entry[] }>(`/api/project/tree?project=${project}&path=${encodeURIComponent(dir)}`)
       setChildren((c) => ({ ...c, [dir]: r.entries }))
     } catch (e) {
       setError((e as Error).message)
     }
-  }, [])
+  }, [project])
 
   // commit novo (pull): recarrega a árvore aberta e o arquivo mostrado
   useEffect(() => {
@@ -49,7 +49,7 @@ export function CodeBrowser({ version }: { version: string }) {
 
   async function openFile(p: string) {
     try {
-      setFile(await getJson<FileDto>(`/api/project/file?path=${encodeURIComponent(p)}`))
+      setFile(await getJson<FileDto>(`/api/project/file?project=${project}&path=${encodeURIComponent(p)}`))
       setError(null)
     } catch (e) {
       setError((e as Error).message)

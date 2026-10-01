@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
 
 test("testes aparecem agrupados pelas pastas do projeto", async ({ page }) => {
   // Arrange
-  await page.goto("/testes")
+  await page.goto("/testes?projeto=robot")
 
   // Act
   const folders = page.getByTestId("tree-folder")
@@ -20,7 +20,7 @@ test("testes aparecem agrupados pelas pastas do projeto", async ({ page }) => {
 
 test("abrir a pasta e o arquivo mostra os casos daquele grupo", async ({ page }) => {
   // Arrange
-  await page.goto("/testes")
+  await page.goto("/testes?projeto=robot")
 
   // Act
   await page.locator('[data-testid="tree-folder"][data-key="scenarios/pix"]').click()
@@ -33,7 +33,7 @@ test("abrir a pasta e o arquivo mostra os casos daquele grupo", async ({ page })
 
 test("marcar a pasta seleciona todos os casos dela", async ({ page }) => {
   // Arrange
-  await page.goto("/testes")
+  await page.goto("/testes?projeto=robot")
   await page.evaluate(() => localStorage.removeItem("qafarm:selected"))
   await page.reload()
 
@@ -48,7 +48,7 @@ test("marcar a pasta seleciona todos os casos dela", async ({ page }) => {
 test("fila de uma pasta recebe o nome versão-build + pasta", async ({ page }) => {
   // Arrange
   await ensureApp(page.request)
-  await page.goto("/testes")
+  await page.goto("/testes?projeto=robot")
   await page.evaluate(() => localStorage.removeItem("qafarm:selected"))
   await page.reload()
   await page.locator('[data-testid="tree-folder"][data-key="scenarios/pix"]').getByTestId("group-check").click()
@@ -63,7 +63,7 @@ test("fila de uma pasta recebe o nome versão-build + pasta", async ({ page }) =
 test("fila de várias pastas recebe o nome versão-build + Fila + data de hoje", async ({ page }) => {
   // Arrange
   await ensureApp(page.request)
-  await page.goto("/testes")
+  await page.goto("/testes?projeto=robot")
   await page.evaluate(() => localStorage.removeItem("qafarm:selected"))
   await page.reload()
   await page.locator('[data-testid="tree-folder"][data-key="scenarios/pix"]').getByTestId("group-check").click()
@@ -81,7 +81,7 @@ test("fila de várias pastas recebe o nome versão-build + Fila + data de hoje",
 test("nome digitado pelo usuário não é sobrescrito", async ({ page }) => {
   // Arrange
   await ensureApp(page.request)
-  await page.goto("/testes")
+  await page.goto("/testes?projeto=robot")
   await page.locator('[data-testid="tree-folder"][data-key="scenarios/ted"]').getByTestId("group-check").click()
   await page.getByTestId("open-create-queue").click()
   await expect(page.getByTestId("queue-name")).toHaveValue(/ted$/)

@@ -38,7 +38,7 @@ test("aumentar as tentativas extras numa fila terminada roda de novo o caso que 
 
 test("esperas vêm ×2 na criação e podem ser alteradas na fila", async ({ page }) => {
   // Arrange
-  await page.goto("/testes")
+  await page.goto("/testes?projeto=robot")
   await page.getByTestId("catalog-search").fill("CT_LOGIN_01-Caso-PASS")
   await page.getByTestId("select-visible").click()
   await page.getByTestId("open-create-queue").click()

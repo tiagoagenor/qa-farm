@@ -1,39 +1,24 @@
 import { z } from "zod"
 
-// GI-App-Test: runner de testes Appium separado (projeto QA_Automacao_TESTE). A fazenda só reserva celulares
-// para ele e dispara `node run.mjs` num ambiente limpo; nada do GI-App-Test entra no fluxo das filas.
+import type { CatalogEntry, RunResult } from "./types"
 
-export const GIAT_ENVS = ["HML", "PROD", "MOCK"] as const
-export const GiatEnvSchema = z.enum(GIAT_ENVS)
+// GI-App-Test (projeto QA_Automacao_TESTE, Node + WebdriverIO): segundo projeto de testes da fazenda. Os casos
+// entram nas mesmas filas do Robot; cada caso roda `node run.mjs <caso> -d <serial>` com o Appium da fazenda.
+// Sem imports de node:* — este arquivo também vai para o navegador.
 
-export const GIAT_RUN_STATUSES = ["installing", "running", "passed", "failed", "error", "canceled"] as const
-export type GiatRunStatus = (typeof GIAT_RUN_STATUSES)[number]
+export const PROJECTS = ["robot", "giat"] as const
+export const ProjectSchema = z.enum(PROJECTS)
+export type Project = z.infer<typeof ProjectSchema>
 
-export const GiatRunSchema = z.object({
-  id: z.string(),
-  serial: z.string(),
-  test: z.string(),
-  env: GiatEnvSchema,
-  status: z.enum(GIAT_RUN_STATUSES),
-  startedAt: z.string(),
-  endedAt: z.string().optional(),
-  exitCode: z.number().int().nullable().optional(),
-  message: z.string().optional(),
-  summary: z.object({ total: z.number(), passed: z.number(), failed: z.number() }).optional(),
-  /** arquivos guardados na pasta da execução (log, JSON, prints) */
-  files: z.array(z.string()).default([]),
-  pgid: z.number().int().optional(),
-})
-export type GiatRun = z.infer<typeof GiatRunSchema>
+export const PROJECT_LABEL: Record<Project, string> = {
+  robot: "Robot (QA_Automacao_APP)",
+  giat: "GI-App-Test (QA_Automacao_TESTE)",
+}
 
-export const GiatStateSchema = z.object({
-  reservations: z.record(z.string(), z.object({ since: z.string() })).default({}),
-  runs: z.array(GiatRunSchema).default([]),
-})
-export type GiatState = z.infer<typeof GiatStateSchema>
+/** Ambientes de cada projeto (valor gravado na fila; o GI-App-Test recebe em maiúsculas). */
+export const PROJECT_ENVS = { robot: ["hml", "dev", "pre"], giat: ["hml", "prod", "mock"] } as const
 
-export const GIAT_MAX_RUNS = 100
-export const GIAT_APPIUM_PORT = 4723
+export const GIAT_ID_PREFIX = "giat:"
 
 /** Caso válido: caminho relativo a tests/, terminando em .mjs, sem "..", fora de tests/flows/. */
 export function validGiatTest(test: string): boolean {
@@ -43,22 +28,22 @@ export function validGiatTest(test: string): boolean {
   return parts[0] !== "flows"
 }
 
-/** Código de saída do run.mjs → status da execução. */
-export function giatStatusFromExit(code: number | null): { status: GiatRunStatus; message?: string } {
-  switch (code) {
-    case 0:
-      return { status: "passed" }
-    case 1:
-      return { status: "failed" }
-    case 2:
-      return { status: "error", message: "Uso inválido (celular fora da reserva ou caso inexistente)" }
-    case 3:
-      return { status: "error", message: "Infraestrutura (Appium fora do ar, celular ausente ou sem porta livre)" }
-    case 130:
-    case 143:
-      return { status: "canceled", message: "Cancelado" }
-    default:
-      return { status: "error", message: `Saiu com código ${code ?? "desconhecido"}` }
+/** Entrada do catálogo a partir do caminho relativo a tests/ (nome bonito opcional, vindo do `run.mjs --list`). */
+export function giatEntry(rel: string, name?: string, tags: string[] = []): CatalogEntry {
+  const parts = rel.split("/")
+  const dir = parts.slice(0, -1).join("/")
+  const base = parts.at(-1)!.replace(/\.mjs$/, "")
+  return {
+    id: `${GIAT_ID_PREFIX}${rel}`,
+    name: name?.trim() || base,
+    fileLongName: rel,
+    suite: dir || "tests",
+    file: `tests/${rel}`,
+    folder: dir ? `tests/${dir}` : "tests",
+    line: 1,
+    tags,
+    accounts: [],
+    duplicate: false,
   }
 }
 
@@ -78,8 +63,8 @@ export function parseEnvFile(text: string): Record<string, string> {
 }
 
 /**
- * Ambiente LIMPO do processo do GI-App-Test: nada herdado da fazenda (o runner dele lê DEVICE_SERIAL,
- * APPIUM_URL, APP_ENV, SYSTEM_PORT…). Os segredos vêm do .env.server dele; o serial permitido é sempre o reservado.
+ * Ambiente LIMPO do processo do caso: nada herdado da fazenda. Os segredos vêm do .env.server do projeto; o
+ * celular, o Appium e a porta do UiAutomator2 são sempre os que a fazenda escolheu (vencem o .env.server).
  */
 export function giatEnv(o: {
   nodeBin: string
@@ -87,7 +72,9 @@ export function giatEnv(o: {
   javaHome: string
   home: string
   tmpDir: string
-  serials: string[]
+  serial: string
+  appiumUrl: string
+  systemPort: number
   secrets: Record<string, string>
 }): Record<string, string> {
   return {
@@ -99,6 +86,51 @@ export function giatEnv(o: {
     ANDROID_HOME: o.sdkRoot,
     ANDROID_SDK_ROOT: o.sdkRoot,
     JAVA_HOME: o.javaHome,
-    GIAT_ALLOWED_DEVICES: o.serials.join(","),
+    GIAT_ALLOWED_DEVICES: o.serial,
+    DEVICE_SERIAL: o.serial,
+    APPIUM_URL: o.appiumUrl,
+    SYSTEM_PORT: String(o.systemPort),
+  }
+}
+
+/** Um teste no --json do run.mjs. */
+export interface GiatJsonResult {
+  ok?: boolean
+  infra?: boolean
+  error?: string
+  shot?: string
+  log?: string
+}
+
+/**
+ * Resultado da tentativa a partir do código de saída e do --json. Saída: 0 passou; 1 falhou; 2 uso inválido
+ * (config); 3 infraestrutura (Appium, celular, porta); 130/143 interrompido pela fazenda.
+ */
+export function classifyGiat(o: {
+  exitCode: number | null
+  canceled: boolean
+  timedOut: boolean
+  deviceLost: boolean
+  results: GiatJsonResult[]
+  screenshots: string[]
+}): RunResult {
+  const err = o.results.find((r) => !r.ok)?.error?.trim()
+  const base = { screenshots: o.screenshots, hasOutputXml: false, exitCode: o.exitCode }
+  if (o.canceled) return { ...base, status: "canceled", message: "Cancelado" }
+  if (o.deviceLost) return { ...base, status: "infra_error", message: "Celular caiu durante o caso" }
+  if (o.timedOut) return { ...base, status: "timeout", message: "Tempo limite da fila estourado" }
+  switch (o.exitCode) {
+    case 0:
+      return { ...base, status: "passed" }
+    case 1:
+      return o.results.some((r) => r.infra)
+        ? { ...base, status: "infra_error", message: err ?? "Erro de infraestrutura" }
+        : { ...base, status: "failed", message: err ?? "Falhou" }
+    case 2:
+      return { ...base, status: "config_error", message: err ?? "Uso inválido do run.mjs (caso inexistente ou celular fora da lista)" }
+    case 3:
+      return { ...base, status: "infra_error", message: err ?? "Infraestrutura: Appium fora do ar, celular ausente ou sem porta" }
+    default:
+      return { ...base, status: "infra_error", message: err ?? `run.mjs saiu com código ${o.exitCode ?? "desconhecido"}` }
   }
 }

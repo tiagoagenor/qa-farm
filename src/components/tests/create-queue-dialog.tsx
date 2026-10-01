@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
+import { type Project, PROJECT_ENVS, PROJECT_LABEL } from "@/core/giat"
 import type { AppMeta, CatalogEntry, Env } from "@/core/types"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -18,13 +19,16 @@ export function CreateQueueDialog({
   open,
   onOpenChange,
   entries,
+  project = "robot",
   onCreated,
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
   entries: CatalogEntry[]
+  project?: Project
   onCreated?: () => void
 }) {
+  const giat = project === "giat"
   const testIds = entries.map((e) => e.id)
   const router = useRouter()
   const [apps, setApps] = useState<AppMeta[] | null>(null)
@@ -64,7 +68,9 @@ export function CreateQueueDialog({
     setSending(true)
     const res = await sendCommand({
       type: "create_queue",
-      input: { name: name.trim(), appId, env, timeoutSec, retries: Number(retries), closeAppAfter, allowSameAccount, waitFactor: Number(waitFactor), testIds },
+      input: giat
+        ? { name: name.trim(), appId, env, project, timeoutSec, retries: Number(retries), closeAppAfter, allowSameAccount: true, testIds }
+        : { name: name.trim(), appId, env, timeoutSec, retries: Number(retries), closeAppAfter, allowSameAccount, waitFactor: Number(waitFactor), testIds },
     })
     setSending(false)
     if (res?.ok && res.data?.queueId) {
@@ -79,7 +85,10 @@ export function CreateQueueDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Criar fila com {testIds.length} caso(s)</DialogTitle>
-          <DialogDescription>Cada celular livre pega o próximo caso da fila automaticamente.</DialogDescription>
+          <DialogDescription>
+            {PROJECT_LABEL[project]} · cada celular livre pega o próximo caso da fila automaticamente.
+            {giat && " Os casos do GI-App-Test rodam nos celulares deste servidor."}
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
@@ -122,9 +131,11 @@ export function CreateQueueDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="hml">hml</SelectItem>
-                  <SelectItem value="dev">dev</SelectItem>
-                  <SelectItem value="pre">pre</SelectItem>
+                  {PROJECT_ENVS[project].map((e) => (
+                    <SelectItem key={e} value={e}>
+                      {giat ? e.toUpperCase() : e}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -148,6 +159,8 @@ export function CreateQueueDialog({
               </Select>
             </div>
           </div>
+          {!giat && (
+          <>
           <div className="flex items-start justify-between gap-4 rounded-md border p-3">
             <div className="grid gap-1">
               <Label>Esperas do teste</Label>
@@ -184,6 +197,8 @@ export function CreateQueueDialog({
               data-testid="queue-same-account"
             />
           </div>
+          </>
+          )}
           <div className="flex items-start justify-between gap-4 rounded-md border p-3">
             <div className="grid gap-1">
               <Label htmlFor="q-close-app">Fechar o app ao terminar cada caso</Label>

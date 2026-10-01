@@ -78,7 +78,9 @@ export function ItemSheet({
   liveOn = false,
   onLive,
   onScreen,
+  giat = false,
 }: {
+  giat?: boolean
   queueId: string
   item: Item | null
   onOpenChange: (o: boolean) => void
@@ -210,7 +212,7 @@ export function ItemSheet({
                             </a>
                           </Button>
                         )}
-                        {["log.html", "report.html", "console.log", "output.xml"].map((f) => (
+                        {(giat ? ["console.log", "giat.json"] : ["log.html", "report.html", "console.log", "output.xml"]).map((f) => (
                           <Button key={f} variant="outline" size="sm" asChild>
                             <a href={runFileUrl(current.dir, f)} target="_blank" rel="noreferrer">
                               {f} <ExternalLink />

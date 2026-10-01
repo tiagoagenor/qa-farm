@@ -188,7 +188,9 @@ function ItemRow({
   liveOn,
   onLive,
   onScreen,
+  giat = false,
 }: {
+  giat?: boolean
   it: Item
   now: number
   busy: boolean
@@ -295,13 +297,13 @@ function ItemRow({
       <TableCell onClick={(e) => e.stopPropagation()}>
         {a && a.status !== "running" ? (
           <a
-            href={runFileUrl(a.dir, "log.html")}
+            href={runFileUrl(a.dir, giat ? "console.log" : "log.html")}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-xs underline"
             data-testid="log-link"
           >
-            log.html <ExternalLink className="size-3" />
+            {giat ? "console.log" : "log.html"} <ExternalLink className="size-3" />
           </a>
         ) : a ? (
           <span className="text-muted-foreground text-xs">ao vivo →</span>
@@ -381,6 +383,7 @@ function QueueOptionsBar({
           </SelectContent>
         </Select>
       </label>
+      {q.project !== "giat" && (
       <label className="flex items-center gap-2">
         <span className="text-muted-foreground">Esperas</span>
         <Select
@@ -400,6 +403,7 @@ function QueueOptionsBar({
           </SelectContent>
         </Select>
       </label>
+      )}
       <span className="text-muted-foreground text-xs">
         Aumentar as tentativas recoloca na fila os casos que falharam (até o novo limite). Vale na hora, mesmo
         com a fila rodando.
@@ -480,6 +484,7 @@ export function QueueDetail({ id }: { id: string }) {
     onOpen: setOpenItem,
     onRetry: (itemId: string) => run({ type: "retry_item", queueId: q.id, itemId }),
     cols: colKeys,
+    giat: q.project === "giat",
   }
 
   return (
@@ -495,7 +500,7 @@ export function QueueDetail({ id }: { id: string }) {
             {q.name} <StatusBadge {...QUEUE_STATUS[q.status]} />
           </span>
         }
-        description={`Criada ${formatDateTime(q.createdAt)} · ambiente ${q.env} · timeout ${formatDuration(q.options.timeoutSec)} · ${q.options.retries} tentativa(s) extra(s) · esperas ${formatFactor(q.options.waitFactor)} · ${q.options.closeAppAfter === false ? "app fica aberto ao fim do caso" : "fecha o app ao fim de cada caso"} · ${q.options.allowSameAccount ? "mesma conta em vários celulares" : "uma conta por vez"}`}
+        description={`${q.project === "giat" ? "GI-App-Test · " : ""}Criada ${formatDateTime(q.createdAt)} · ambiente ${q.project === "giat" ? q.env.toUpperCase() : q.env} · timeout ${formatDuration(q.options.timeoutSec)} · ${q.options.retries} tentativa(s) extra(s) · ${q.project === "giat" ? "" : `esperas ${formatFactor(q.options.waitFactor)} · `}${q.options.closeAppAfter === false ? "app fica aberto ao fim do caso" : "fecha o app ao fim de cada caso"}${q.project === "giat" ? "" : ` · ${q.options.allowSameAccount ? "mesma conta em vários celulares" : "uma conta por vez"}`}`}
         actions={
           <>
             {q.status === "running" && (
@@ -726,6 +731,7 @@ export function QueueDetail({ id }: { id: string }) {
         item={selectedItem}
         onOpenChange={(o) => !o && setOpenItem(null)}
         onRetry={(itemId) => run({ type: "retry_item", queueId: q.id, itemId })}
+        giat={q.project === "giat"}
         liveOn={liveOn}
         onLive={setLive}
         onScreen={setScreen}

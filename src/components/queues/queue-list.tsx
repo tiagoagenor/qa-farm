@@ -190,7 +190,7 @@ export function QueueList() {
                       {q.name}
                     </Link>
                     <div className="text-muted-foreground text-xs">
-                      {formatDateTime(q.createdAt)} · {q.total} caso(s) · {q.env}
+                      {formatDateTime(q.createdAt)} · {q.total} caso(s) · {q.project === "giat" ? `GI-App-Test · ${q.env.toUpperCase()}` : q.env}
                     </div>
                   </TableCell>
                   <TableCell>

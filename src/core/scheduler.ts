@@ -53,6 +53,8 @@ export function schedule(queues: Queue[], freeDevices: FreeDevice[], running: Ru
 
   for (const q of ordered) {
     if (free.length === 0) break
+    // GI-App-Test roda só nos celulares do mestre (sem worker e sem BrowserStack)
+    const eligible = (d: FreeDevice) => q.project !== "giat" || !d.machineId
     const shared = q.options.allowSameAccount === true
     const pending = pendingByAccount(q.items)
     const candidates = q.items
@@ -61,13 +63,16 @@ export function schedule(queues: Queue[], freeDevices: FreeDevice[], running: Ru
       .sort((a, b) => b.weight - a.weight || a.pos - b.pos)
 
     for (const { it } of candidates) {
-      if (free.length === 0) break
+      if (!free.some(eligible)) break
       if (!shared && it.accounts.some((a) => locked.has(a))) continue
 
       const used = new Set(it.attempts.map((a) => a.serial))
       const usedMachines = new Set(it.attempts.map((a) => a.machineId ?? ""))
-      const otherMachine = it.attempts.length ? free.findIndex((d) => !usedMachines.has(d.machineId ?? "")) : -1
-      const idx = otherMachine >= 0 ? otherMachine : Math.max(0, free.findIndex((d) => !used.has(d.serial)))
+      const otherMachine = it.attempts.length
+        ? free.findIndex((d) => eligible(d) && !usedMachines.has(d.machineId ?? ""))
+        : -1
+      const unused = free.findIndex((d) => eligible(d) && !used.has(d.serial))
+      const idx = otherMachine >= 0 ? otherMachine : unused >= 0 ? unused : free.findIndex(eligible)
       const [dev] = free.splice(idx, 1)
       for (const a of it.accounts) locked.add(a)
       out.push({ queueId: q.id, itemId: it.id, serial: dev.serial })

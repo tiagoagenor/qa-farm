@@ -7,6 +7,7 @@ export interface QueueSummaryDto {
   finishedAt: string | null
   appId: string
   env: string
+  project?: "robot" | "giat"
   status: QueueStatus
   options: { timeoutSec: number; retries: number }
   total: number

@@ -13,7 +13,8 @@ export interface RobotLauncher {
   spawn(opts: { args: string[]; env: Record<string, string>; cwd: string; consoleFile: string }): SpawnedRobot
 }
 
-function launch(cmd: string, argv: string[], env: Record<string, string>, cwd: string, consoleFile: string): SpawnedRobot {
+/** Processo em grupo próprio com saída no arquivo (robot e run.mjs do GI-App-Test). */
+export function launch(cmd: string, argv: string[], env: Record<string, string>, cwd: string, consoleFile: string): SpawnedRobot {
   fs.mkdirSync(path.dirname(consoleFile), { recursive: true })
   const out = fs.openSync(consoleFile, "a")
   // detached: o robot vira líder de um grupo de processos (pgid = pid) → timeout/cancelar matam o grupo todo

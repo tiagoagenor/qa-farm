@@ -5,7 +5,8 @@ import path from "node:path"
 
 import { isBlockedPath, isEnvFile, MASK, maskSecrets, ProjectGitStateSchema } from "@/core/project-git"
 import { readJson } from "@/core/store"
-import { projectRoot, projectSecrets } from "@/server/project-git"
+import type { Project } from "@/core/giat"
+import { giatSecrets, projectRoot, projectSecrets } from "@/server/project-git"
 
 import { ctx } from "./context"
 import { runnerStatus } from "./data"
@@ -15,10 +16,20 @@ import { runnerStatus } from "./data"
 
 export const MAX_VIEW_BYTES = 512 * 1024
 
-export async function readProject() {
+/** Pasta do projeto escolhido na página (Robot ou GI-App-Test). */
+export function rootOf(project: Project): string {
+  const { cfg } = ctx()
+  return project === "giat" ? cfg.giatDir : projectRoot(cfg)
+}
+
+export function projectFromParam(v: string | null): Project {
+  return v === "giat" ? "giat" : "robot"
+}
+
+export async function readProject(project: Project = "robot") {
   const { p } = ctx()
   const [state, runner] = await Promise.all([
-    readJson(p.projectGit, ProjectGitStateSchema.nullable(), null),
+    readJson(project === "giat" ? p.projectGitGiat : p.projectGit, ProjectGitStateSchema.nullable(), null),
     runnerStatus(),
   ])
   return { state, runnerAlive: runner.alive }
@@ -106,7 +117,9 @@ export async function readProjectFile(
       masked = out !== text
       text = out
     }
-    const r = maskSecrets(text, await projectSecrets(ctx().cfg, root))
+    const { cfg } = ctx()
+    const secrets = root === cfg.giatDir ? await giatSecrets(cfg) : await projectSecrets(cfg, root)
+    const r = maskSecrets(text, secrets)
     return {
       path: rel,
       size: st.size,

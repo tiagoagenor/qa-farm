@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
 
 test("fechar o app e usar a mesma conta em vários celulares vêm ligados; fechar o app pode ser desligado", async ({ page }) => {
   // Arrange
-  await page.goto("/testes")
+  await page.goto("/testes?projeto=robot")
   await page.getByTestId("catalog-search").fill("CT_LOGIN_01-Caso-PASS")
   await page.getByTestId("select-visible").click()
   await page.getByTestId("open-create-queue").click()

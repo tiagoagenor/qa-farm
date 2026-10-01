@@ -1,9 +1,11 @@
 "use client"
 
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { AlertTriangle, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileCode2, Folder, FolderOpen, ListPlus, RefreshCw, X } from "lucide-react"
+import { AlertTriangle, ArrowLeftRight, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileCode2, Folder, FolderOpen, ListPlus, RefreshCw, X } from "lucide-react"
+import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 
+import { type Project, PROJECT_LABEL } from "@/core/giat"
 import type { CatalogEntry } from "@/core/types"
 import { minTheoreticalSec } from "@/core/queue-logic"
 import { EmptyState, PageHeader } from "@/components/panel/page-header"
@@ -32,10 +34,10 @@ interface CatalogResponse {
 }
 
 const ROW_H = 44
-const STORAGE_KEY = "qafarm:selected"
 
-export function TestCatalog() {
-  const { data, loading, reload } = usePoll<CatalogResponse>("/api/catalog", 15_000)
+export function TestCatalog({ project = "robot" }: { project?: Project }) {
+  const STORAGE_KEY = project === "giat" ? "qafarm:selected:giat" : "qafarm:selected"
+  const { data, loading, reload } = usePoll<CatalogResponse>(project === "giat" ? "/api/catalog?project=giat" : "/api/catalog", 15_000)
   const { data: overview } = usePoll<{ devices: { emulators: number; ready: number; busy: number } }>("/api/overview", 10_000)
   const entries = useMemo(() => data?.entries ?? [], [data])
   const [search, setSearch] = useState("")
@@ -110,23 +112,30 @@ export function TestCatalog() {
   }
 
   async function refreshCatalog() {
-    const r = await sendCommand({ type: "refresh_catalog" })
-    if (r?.ok) setTimeout(() => void reload(), 3000)
+    const r = await sendCommand(project === "giat" ? { type: "refresh_catalog", project } : { type: "refresh_catalog" })
+    if (r?.ok) setTimeout(() => void reload(), project === "giat" ? 500 : 3000)
   }
 
   return (
     <div>
       <PageHeader
-        title="Testes"
+        title={`Testes · ${PROJECT_LABEL[project]}`}
         description={
           data
             ? `${data.total} casos no catálogo${data.generatedAt ? ` · atualizado ${new Date(data.generatedAt).toLocaleString("pt-BR")}` : ""}`
-            : "Casos do projeto QA_Automacao_APP"
+            : PROJECT_LABEL[project]
         }
         actions={
-          <Button variant="outline" onClick={refreshCatalog}>
-            <RefreshCw /> Atualizar catálogo
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" asChild>
+              <Link href="/testes" data-testid="switch-project">
+                <ArrowLeftRight /> Trocar projeto
+              </Link>
+            </Button>
+            <Button variant="outline" onClick={refreshCatalog}>
+              <RefreshCw /> Atualizar catálogo
+            </Button>
+          </div>
         }
       />
 
@@ -347,7 +356,7 @@ export function TestCatalog() {
         </SheetContent>
       </Sheet>
 
-      <CreateQueueDialog open={dialog} onOpenChange={setDialog} entries={selectedEntries} onCreated={() => setSelected(new Set())} />
+      <CreateQueueDialog open={dialog} onOpenChange={setDialog} entries={selectedEntries} project={project} onCreated={() => setSelected(new Set())} />
     </div>
   )
 }

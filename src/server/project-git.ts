@@ -244,3 +244,13 @@ export async function projectSecrets(cfg: Config, root = projectRoot(cfg)): Prom
   }
   return out
 }
+
+/** Segredos do GI-App-Test a mascarar: valores do .env.server (e da chave do BrowserStack do painel). */
+export async function giatSecrets(cfg: Config): Promise<string[]> {
+  const out = [cfg.bsKey].filter(Boolean)
+  for (const f of await fsp.readdir(cfg.giatDir).catch(() => [] as string[])) {
+    if (!/^\.env/i.test(f) || /\.example$/i.test(f)) continue
+    out.push(...envValues(await fsp.readFile(path.join(cfg.giatDir, f), "utf8").catch(() => "")))
+  }
+  return out
+}

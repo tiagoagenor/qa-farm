@@ -217,6 +217,7 @@ export function queueSummary(q: Queue, readyDevices: number) {
     finishedAt: q.finishedAt ?? null,
     appId: q.appId,
     env: q.env,
+    project: q.project ?? "robot",
     status: q.status,
     options: q.options,
     ...s,

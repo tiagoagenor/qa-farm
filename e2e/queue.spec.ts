@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
 
 test("selecionar casos pelo filtro e criar fila mostra passou/falhou por caso", async ({ page }) => {
   // Arrange
-  await page.goto("/testes")
+  await page.goto("/testes?projeto=robot")
   await page.getByTestId("catalog-search").fill("CT_LOGIN_0")
   await expect(page.getByTestId("visible-count")).toHaveText(/^9 de \d+ casos$/)
 

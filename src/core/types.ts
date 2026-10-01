@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { GiatEnvSchema } from "./giat"
+import { ProjectSchema } from "./giat"
 import { BranchNameSchema } from "./project-git"
 
 // ---------------------------------------------------------------- apps ---
@@ -44,7 +44,8 @@ export type Catalog = z.infer<typeof CatalogSchema>
 
 // -------------------------------------------------------------- queues ---
 export const ENVIRONMENTS = ["hml", "dev", "pre"] as const
-export const EnvSchema = z.enum(ENVIRONMENTS)
+/** Ambiente da fila: hml/dev/pre (Robot) ou hml/prod/mock (GI-App-Test) — ver PROJECT_ENVS */
+export const EnvSchema = z.enum(["hml", "dev", "pre", "prod", "mock"])
 export type Env = z.infer<typeof EnvSchema>
 
 export const ITEM_STATUSES = [
@@ -136,6 +137,8 @@ export const QueueSchema = z.object({
   finishedAt: z.string().optional(),
   appId: z.string(),
   env: EnvSchema,
+  /** projeto de testes (ausente = Robot) */
+  project: ProjectSchema.optional(),
   status: QueueStatusSchema,
   options: QueueOptionsSchema,
   snapshotHash: z.string().optional(),
@@ -152,8 +155,6 @@ export const DEVICE_STATES = [
   "busy",
   "maintenance",
   "external",
-  /** reservado para o GI-App-Test: fora das filas, a fazenda não instala nem mexe na tela */
-  "reserved",
 ] as const
 export const DeviceStateSchema = z.enum(DEVICE_STATES)
 export type DeviceState = z.infer<typeof DeviceStateSchema>
@@ -229,6 +230,7 @@ export const CreateQueueInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
   appId: z.string().min(1),
   env: EnvSchema,
+  project: ProjectSchema.optional(), // ausente = Robot
   timeoutSec: z.number().int().min(10).max(24 * 3600),
   retries: z.number().int().min(0).max(10),
   closeAppAfter: z.boolean().optional(), // ausente = true
@@ -285,9 +287,9 @@ export const CommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("remove_machine"), id: z.string() }),
   z.object({ type: z.literal("set_machine_enabled"), id: z.string(), enabled: z.boolean() }),
   z.object({ type: z.literal("set_machine_run_robot"), id: z.string(), enabled: z.boolean() }),
-  z.object({ type: z.literal("project_fetch") }),
-  z.object({ type: z.literal("project_update"), branch: BranchNameSchema }),
-  z.object({ type: z.literal("project_preview"), branch: BranchNameSchema }),
+  z.object({ type: z.literal("project_fetch"), project: ProjectSchema.optional() }),
+  z.object({ type: z.literal("project_update"), branch: BranchNameSchema, project: ProjectSchema.optional() }),
+  z.object({ type: z.literal("project_preview"), branch: BranchNameSchema, project: ProjectSchema.optional() }),
   z.object({ type: z.literal("test_machine"), id: z.string() }),
   z.object({ type: z.literal("deploy_machine"), id: z.string() }),
   z.object({ type: z.literal("rotate_machine_token"), id: z.string() }),
@@ -296,16 +298,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("set_emulator_enabled"), serial: z.string().min(1).max(100), enabled: z.boolean() }),
   z.object({ type: z.literal("restart_appiums") }),
   z.object({ type: z.literal("delete_app"), appId: z.string() }),
-  z.object({ type: z.literal("refresh_catalog") }),
-  z.object({ type: z.literal("giat_reserve"), serial: z.string().min(1).max(100) }),
-  z.object({ type: z.literal("giat_release"), serial: z.string().min(1).max(100) }),
-  z.object({
-    type: z.literal("giat_run"),
-    serial: z.string().min(1).max(100),
-    test: z.string().min(1).max(300),
-    env: GiatEnvSchema.default("HML"),
-  }),
-  z.object({ type: z.literal("giat_cancel"), runId: z.string().min(1).max(80) }),
+  z.object({ type: z.literal("refresh_catalog"), project: ProjectSchema.optional() }),
 ])
 export type Command = z.infer<typeof CommandSchema>
 export type CommandType = Command["type"]

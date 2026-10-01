@@ -22,6 +22,8 @@ export interface Adapters {
   metrics: HostMetrics
   browserstack: BrowserStackApi
   git: ProjectGit
+  /** git do GI-App-Test (QA_Automacao_TESTE) */
+  giatGit: ProjectGit
 }
 
 export function createAdapters(cfg: Config): Adapters {
@@ -37,6 +39,7 @@ export function createAdapters(cfg: Config): Adapters {
       metrics: fakeHostMetrics(cfg),
       browserstack: fakeBrowserStack(cfg),
       git: fakeProjectGit(cfg, projectRoot(cfg)),
+      giatGit: fakeProjectGit(cfg, cfg.giatDir),
     }
   }
   return {
@@ -50,5 +53,6 @@ export function createAdapters(cfg: Config): Adapters {
     metrics: realHostMetrics(),
     browserstack: realBrowserStack(cfg),
     git: realProjectGit(cfg.robotProject),
+    giatGit: realProjectGit(cfg.giatDir),
   }
 }

@@ -10,6 +10,7 @@ export function dataPaths(dataDir: string) {
     appMeta: (appId: string) => path.join(dataDir, "apps", appId, "meta.json"),
     uploads: path.join(dataDir, "uploads"),
     catalog: path.join(dataDir, "catalog", "catalog.json"),
+    giatCatalog: path.join(dataDir, "catalog", "giat.json"),
     queues: path.join(dataDir, "queues"),
     queue: (queueId: string) => path.join(dataDir, "queues", `${queueId}.json`),
     runs: path.join(dataDir, "runs"),
@@ -34,14 +35,11 @@ export function dataPaths(dataDir: string) {
     machines: path.join(dataDir, "state", "machines.json"),
     machinesStatus: path.join(dataDir, "state", "machines-status.json"),
     projectGit: path.join(dataDir, "state", "project-git.json"),
+    projectGitGiat: path.join(dataDir, "state", "project-git-giat.json"),
     screen: path.join(dataDir, "state", "screen.json"),
     runnerLock: path.join(dataDir, "state", "runner.lock"),
     logs: path.join(dataDir, "logs"),
     appiumLog: (serial: string) => path.join(dataDir, "logs", `appium-${serial}.log`),
-    giatState: path.join(dataDir, "state", "giat.json"),
-    giatRuns: path.join(dataDir, "giat"),
-    giatRun: (id: string) => path.join(dataDir, "giat", id),
-    giatAppiumLog: path.join(dataDir, "logs", "giat-appium.log"),
   }
 }
 export type DataPaths = ReturnType<typeof dataPaths>

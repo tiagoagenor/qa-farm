@@ -1,11 +1,11 @@
 import fs from "node:fs"
+import os from "node:os"
 import fsp from "node:fs/promises"
 import path from "node:path"
 
 import { z } from "zod"
 
 import { RUN_OUT, RUN_REPO } from "@/core/agent-protocol"
-import { type GitOp, maskSecrets, type ProjectGitState } from "@/core/project-git"
 import type { Config } from "@/core/config"
 import { newId } from "@/core/ids"
 import {
@@ -32,11 +32,11 @@ import {
 } from "@/core/browserstack"
 import { InfraBreaker } from "@/core/infra-breaker"
 import { stepThrottle, throttleRoom, type ThrottleState } from "@/core/cpu-throttle"
-import { Giat } from "./giat"
+import { classifyGiat, type GiatJsonResult, giatEnv, parseEnvFile, PROJECT_ENVS } from "@/core/giat"
 import { evaluateHealth, type HealthResult, type HealthState } from "@/core/health"
 import { type HostSample, MetricsFileSchema, MetricsHistory } from "@/core/metrics"
 import { parseMassa } from "@/core/massa"
-import { nextPhysicalIndex, parseAdbDevices, serialFromIndex } from "@/core/parsers/adb-devices"
+import { nextPhysicalIndex, parseAdbDevices, portsFor, serialFromIndex } from "@/core/parsers/adb-devices"
 import { classifyRun } from "@/core/parsers/robot-output"
 import { dataPaths } from "@/core/paths"
 import {
@@ -62,6 +62,7 @@ import {
   DesiredSchema,
   type Device,
   type DevicesState,
+  type Item,
   EmulatorsDisabledSchema,
   type Settings,
   SettingsSchema,
@@ -77,9 +78,12 @@ import { INSTALL_NEEDS_UNINSTALL_RE } from "@/server/adb"
 import type { Adb } from "@/server/adb"
 import type { AppiumPool } from "@/server/appium"
 import { killGroup } from "@/server/exec"
+import { buildGiatCatalog } from "@/server/giat-catalog"
+import { launch } from "@/server/robot"
+import { ProjectGitManager } from "./project-git-manager"
 import type { FarmOp } from "@/server/farm"
 import { describeOp } from "@/server/farm"
-import { projectSecrets } from "@/server/project-git"
+import { giatSecrets, projectSecrets } from "@/server/project-git"
 import type { Snapshot } from "@/server/snapshot"
 
 import { RemoteMachines } from "./remote"
@@ -107,6 +111,8 @@ interface RunningAttempt {
   deviceLost: boolean
   physical: boolean
   timers: NodeJS.Timeout[]
+  /** caso do GI-App-Test (run.mjs), não do Robot */
+  giat?: boolean
 }
 
 interface RemoteRun {
@@ -165,7 +171,7 @@ export class Runner {
   private lastHealthLevel: HealthResult["level"] = "ok"
   private lastBrakeLog = 0
   private throttle: ThrottleState = { cap: null }
-  private giat: Giat
+  private giatCatalog: Catalog | null = null
   private lastDeviceRefresh = 0
   private adbRaw = ""
   private catalog: Catalog | null = null
@@ -176,11 +182,9 @@ export class Runner {
   // ---- projeto Robot (git): uma operação por vez; a trava também cobre a cópia (snapshot) do projeto,
   // para um pull no meio do rsync não gerar um snapshot que não bate com o hash
   private projectChain: Promise<unknown> = Promise.resolve()
-  private gitOp?: GitOp
-  private gitPreview?: string
-  private gitState: Omit<ProjectGitState, "updatedAt" | "op"> = {}
-  private lastGitStatus = 0
-  private gitStatusBusy = false
+  private readonly robotGit: ProjectGitManager
+  private readonly giatGit: ProjectGitManager
+  private giatChain: Promise<unknown> = Promise.resolve()
   private activeAppId?: string
   private appMetaCache = new Map<string, AppMeta | null>()
   private ticking = false
@@ -216,7 +220,34 @@ export class Runner {
   ) {
     this.p = dataPaths(cfg.dataDir)
     this.remote = new RemoteMachines(cfg, this.p, log)
-    this.giat = new Giat(cfg, this.p, log)
+    this.robotGit = new ProjectGitManager({
+      label: "projeto",
+      git: () => this.ad.git,
+      file: this.p.projectGit,
+      secrets: () => projectSecrets(this.cfg),
+      serialize: (fn) => this.withProject(fn),
+      log,
+      // código novo → snapshot e catálogo novos (filas em andamento seguem com o snapshot delas)
+      onUpdated: () => void this.refreshCatalog(false),
+    })
+    this.giatGit = new ProjectGitManager({
+      label: "GI-App-Test",
+      git: () => this.ad.giatGit,
+      file: this.p.projectGitGiat,
+      secrets: () => giatSecrets(this.cfg),
+      serialize: (fn) => {
+        const next = this.giatChain.then(fn, fn)
+        this.giatChain = next.catch(() => undefined)
+        return next
+      },
+      log,
+      onUpdated: () => void this.refreshGiatCatalog(),
+      // os casos do GI-App-Test rodam direto da pasta (sem snapshot): não troca o código no meio deles
+      blockUpdate: () =>
+        [...this.running.values()].some((r) => r.giat)
+          ? "Há casos do GI-App-Test rodando (eles usam o código da pasta). Aguarde terminarem ou pause a fila."
+          : null,
+    })
     this.adb = routedAdb(ad.adb, this.remote)
     this.appium = routedAppium(ad.appium, this.remote)
     this.remote.onReboot = (id) => this.forgetMachine(id)
@@ -307,7 +338,6 @@ export class Runner {
       this.queues.set(fixed.id, fixed)
       if (fixed !== original) this.persistQueue(fixed.id)
     }
-    await this.giat.load()
     const desired = await readJson(this.p.desired, DesiredSchema, { devices: 0 })
     this.desired = desired.devices
     await this.remote.load(desired.machines ?? {})
@@ -332,7 +362,9 @@ export class Runner {
     this.catalogStatus = this.catalog ? "ready" : "missing"
     await this.pickActiveApp()
     void this.refreshCatalog(false)
-    void this.refreshGitState()
+    void this.refreshGiatCatalog()
+    void this.robotGit.refresh()
+    if (this.giatPresent()) void this.giatGit.refresh()
     this.log(`iniciado (fake=${this.cfg.fake}) filas=${this.queues.size} desejados=${this.desired}`)
   }
 
@@ -353,9 +385,9 @@ export class Runner {
       this.reconcileRemoteFarms()
       await this.reconcileOrphans()
       await this.processRemoteCleanup()
-      if (Date.now() - this.lastGitStatus > 60_000) void this.refreshGitState()
+      this.robotGit.tick()
+      if (this.giatPresent()) this.giatGit.tick()
       await this.collectMetrics()
-      await this.giat.tick()
       await this.dispatch()
       await this.writeRunnerState()
       await this.writeMachinesStatus()
@@ -368,7 +400,6 @@ export class Runner {
 
   async shutdown(): Promise<void> {
     this.remote.shutdown()
-    await this.giat.shutdown()
     await this.writeRunnerState()
     await Promise.all([...this.writeChains.values()])
   }
@@ -716,92 +747,8 @@ export class Runner {
     return this.withProject(() => this.ad.snapshots.ensure())
   }
 
-  /** Lê branch, commits, alterações e branches remotas (sem rede) e grava state/project-git.json. */
-  private async refreshGitState(): Promise<void> {
-    if (this.gitStatusBusy) return
-    this.gitStatusBusy = true
-    this.lastGitStatus = Date.now()
-    try {
-      const snap = await this.withProject(() => this.ad.git.snapshot(this.gitPreview))
-      this.gitState = {
-        ...this.gitState,
-        ...snap,
-        remoteUrl: await this.ad.git.remoteUrl().catch(() => undefined),
-        error: undefined,
-      }
-    } catch (e) {
-      this.gitState = { ...this.gitState, error: (e as Error).message }
-    } finally {
-      this.gitStatusBusy = false
-    }
-    await this.writeGitState()
-  }
-
-  private async writeGitState(): Promise<void> {
-    const secrets = await projectSecrets(this.cfg).catch(() => [] as string[])
-    const mask = (t: string) => maskSecrets(t, secrets).text
-    const state: ProjectGitState = {
-      ...this.gitState,
-      updatedAt: new Date().toISOString(),
-      op: this.gitOp && {
-        ...this.gitOp,
-        message: this.gitOp.message && mask(this.gitOp.message),
-        log: this.gitOp.log.map(mask),
-      },
-    }
-    await writeJsonAtomic(this.p.projectGit, state)
-  }
-
-  /** Busca (fetch) ou atualiza (troca de branch + fast-forward) em segundo plano; uma por vez. */
-  private startGitOp(kind: GitOp["kind"], branch?: string): { ok: boolean; message: string } {
-    if (this.gitOp?.status === "running")
-      return { ok: false, message: "Operação git em andamento; aguarde terminar" }
-    const op: GitOp = {
-      id: newId("git"),
-      kind,
-      branch,
-      status: "running",
-      startedAt: new Date().toISOString(),
-      log: [],
-    }
-    this.gitOp = op
-    const log = (l: string) => {
-      op.log.push(l)
-      if (op.log.length > 300) op.log.splice(0, op.log.length - 300)
-    }
-    const timer = setInterval(() => void this.writeGitState(), 1000)
-    this.log(`projeto: ${kind === "fetch" ? "buscando atualizações (fetch)" : `atualizando para ${branch}`}`)
-    void (async () => {
-      let ok = false
-      try {
-        if (kind === "fetch") {
-          await this.withProject(() => this.ad.git.fetch(log))
-          ok = true
-          op.message = "Branches e commits do servidor git atualizados"
-        } else {
-          const r = await this.withProject(() => this.ad.git.update(branch!, log))
-          ok = r.ok
-          op.message = r.message
-        }
-        if (ok) this.gitState = { ...this.gitState, fetchedAt: new Date().toISOString() }
-      } catch (e) {
-        op.message = (e as Error).message
-        log(`✖ ${op.message}`)
-      }
-      clearInterval(timer)
-      op.status = ok ? "ok" : "error"
-      op.endedAt = new Date().toISOString()
-      if (kind === "update" && ok) this.gitPreview = undefined
-      this.log(`projeto: ${op.status === "ok" ? "ok" : "falhou"} — ${op.message ?? ""}`)
-      await this.refreshGitState()
-      // código novo → snapshot e catálogo novos (filas em andamento seguem com o snapshot delas)
-      if (kind === "update" && ok) void this.refreshCatalog(false)
-    })()
-    return {
-      ok: true,
-      message:
-        kind === "fetch" ? "Buscando atualizações do servidor git…" : `Atualizando o projeto para ${branch}…`,
-    }
+  private giatPresent(): boolean {
+    return fs.existsSync(path.join(this.cfg.giatDir, "run.mjs"))
   }
 
   // ------------------------------------------------------------- catálogo ---
@@ -882,6 +829,23 @@ export class Runner {
             ok: false,
             message: `A fila "${other.name}" usa outro app. Um app por vez: aguarde, cancele ou use o mesmo app.`,
           }
+        const project = c.input.project ?? "robot"
+        if (!(PROJECT_ENVS[project] as readonly string[]).includes(c.input.env))
+          return { ok: false, message: `Ambiente ${c.input.env} não existe para este projeto` }
+        if (project === "giat") {
+          // GI-App-Test: catálogo lido na hora (o código roda direto da pasta do projeto)
+          const cat = await this.refreshGiatCatalog()
+          if (!cat) return { ok: false, message: `GI-App-Test não encontrado em ${this.cfg.giatDir}` }
+          const { queue, missing } = buildQueue(newId("queue"), c.input, new Map(cat.entries.map((e) => [e.id, e])), new Date())
+          if (queue.items.length === 0) return { ok: false, message: "Nenhum caso selecionado existe no GI-App-Test" }
+          this.setQueue(queue)
+          await this.pickActiveApp()
+          return {
+            ok: true,
+            message: `Fila do GI-App-Test criada com ${queue.items.length} caso(s)${missing.length ? ` (${missing.length} ignorado(s): não existem mais)` : ""}`,
+            data: { queueId: queue.id, items: queue.items.length, missing },
+          }
+        }
         if (!this.catalog && this.catalogBuild) await this.catalogBuild // 1ª geração ainda em andamento
         if (!this.catalog) return { ok: false, message: "Catálogo ainda não está pronto" }
         const snap = this.snapshot ?? (this.snapshot = await this.ensureSnapshot())
@@ -933,6 +897,7 @@ export class Runner {
             name: `${q.name} · re-run falhas`,
             appId: q.appId,
             env: q.env,
+            project: q.project,
             timeoutSec: q.options.timeoutSec,
             retries: q.options.retries,
             closeAppAfter: q.options.closeAppAfter,
@@ -1139,8 +1104,6 @@ export class Runner {
         }
         if ([...this.running.values()].some((r) => !r.machineId))
           return { ok: false, message: "Há casos em execução. Pause ou cancele as filas antes." }
-        if (this.giat.reservedSerials().some((s) => s.startsWith("emulator-")))
-          return { ok: false, message: "Há emuladores reservados para o GI-App-Test. Libere-os antes." }
         this.desired = 0
         await this.saveDesired()
         this.farmOps = [{ kind: "stopAll" }]
@@ -1153,8 +1116,6 @@ export class Runner {
         const d = this.devices.get(c.serial)
         if (!d || d.kind !== "emulator" || !d.index)
           return { ok: false, message: "Só é possível reiniciar emuladores da fazenda" }
-        if (this.giat.reserved(c.serial))
-          return { ok: false, message: "Celular reservado para o GI-App-Test: libere antes" }
         if ([...this.running.values()].some((r) => r.serial === c.serial))
           return { ok: false, message: "Celular ocupado com um caso" }
         this.restartDevice(d.index, "reinício pedido pelo usuário")
@@ -1258,13 +1219,14 @@ export class Runner {
         }
       }
       case "project_fetch":
-        return this.startGitOp("fetch")
       case "project_update":
-        return this.startGitOp("update", c.branch)
       case "project_preview": {
-        this.gitPreview = c.branch
-        await this.refreshGitState()
-        return { ok: true, message: `Mostrando o que a branch ${c.branch} traria` }
+        if (c.project === "giat" && !this.giatPresent())
+          return { ok: false, message: `GI-App-Test não encontrado em ${this.cfg.giatDir}` }
+        const g = c.project === "giat" ? this.giatGit : this.robotGit
+        if (c.type === "project_fetch") return g.start("fetch")
+        if (c.type === "project_update") return g.start("update", c.branch)
+        return g.showPreview(c.branch)
       }
       case "set_machine_run_robot": {
         try {
@@ -1320,35 +1282,15 @@ export class Runner {
         return { ok: true, message: "App apagado" }
       }
       case "refresh_catalog": {
+        if (c.project === "giat") {
+          const cat = await this.refreshGiatCatalog()
+          return cat
+            ? { ok: true, message: `Catálogo do GI-App-Test: ${cat.total} caso(s)` }
+            : { ok: false, message: `GI-App-Test não encontrado em ${this.cfg.giatDir}` }
+        }
         void this.refreshCatalog(true)
         return { ok: true, message: "Atualizando catálogo" }
       }
-      case "giat_reserve": {
-        const d = this.devices.get(c.serial)
-        if (!d || d.machineId || (d.kind !== "emulator" && d.kind !== "physical"))
-          return { ok: false, message: "Só celulares deste servidor podem ser reservados" }
-        const r = await this.giat.reserve(c.serial)
-        this.lastDeviceRefresh = 0
-        return r
-      }
-      case "giat_release": {
-        const r = await this.giat.release(c.serial)
-        if (r.ok) {
-          // a fazenda confere de novo o app instalado e prepara o celular antes de usá-lo
-          this.appVersions.delete(c.serial)
-          this.apkChecked.delete(c.serial)
-          this.installedBy.delete(c.serial)
-          this.prepared.delete(c.serial)
-          this.lastDeviceRefresh = 0
-        }
-        return r
-      }
-      case "giat_run": {
-        const d = this.devices.get(c.serial)
-        return this.giat.start(c.serial, c.test, c.env, d?.state === "reserved" && d.adbState === "device")
-      }
-      case "giat_cancel":
-        return this.giat.cancel(c.runId)
     }
   }
 
@@ -1444,17 +1386,6 @@ export class Runner {
         updatedAt: now,
       }
       const isPhysical = d.kind === "physical"
-      if (!d.machineId && this.giat.reserved(d.serial) && !busyBySerial.has(d.serial)) {
-        // GI-App-Test: fora das filas; a fazenda não instala, não prepara e não apaga a tela
-        const gr = this.giat.activeRun(d.serial)
-        if (isPhysical) Object.assign(base, { name: d.model ?? d.serial })
-        next.set(d.serial, {
-          ...base,
-          state: d.adbState === "device" ? "reserved" : base.qemuPid ? "booting" : "offline",
-          note: gr ? `GI-App-Test: rodando ${gr.test}` : "Reservado para o GI-App-Test",
-        })
-        continue
-      }
       if (isPhysical && d.machineId) {
         next.set(d.serial, {
           ...base,
@@ -1912,6 +1843,7 @@ export class Runner {
     const it = q?.items.find((i) => i.id === a.itemId)
     const meta = await this.appMeta(q?.appId)
     if (!q || !it || !meta) return
+    if (q.project === "giat") return this.startGiatAttempt(q, it, a, index)
     let snap = this.snapshot
     if (!snap || (q.snapshotHash && snap.hash !== q.snapshotHash)) {
       const dir = path.join(this.p.workspaces, q.snapshotHash ?? "")
@@ -2013,6 +1945,25 @@ export class Runner {
       pgid = spawned.pid
       exited = spawned.exited
     }
+    await this.trackAttempt({ q, it, a, index, machineId, n, dir, pgid, remote, exited, host })
+  }
+
+  /** Registra a tentativa iniciada (Robot ou GI-App-Test): fila, celular ocupado, timeout e fim. */
+  private async trackAttempt(o: {
+    q: Queue
+    it: Item
+    a: Assignment
+    index: number
+    machineId?: string
+    n: number
+    dir: string
+    pgid: number
+    remote?: RemoteRun
+    exited?: Promise<{ code: number | null }>
+    host?: string
+    giat?: boolean
+  }): Promise<void> {
+    const { q, it, a, index, machineId, n, dir, pgid, remote, exited, host } = o
     const startedAt = new Date().toISOString()
     const relDir = path.relative(this.p.runs, dir)
     const qemuPid = machineId
@@ -2036,6 +1987,7 @@ export class Runner {
       deviceLost: false,
       physical: this.physical.has(a.serial),
       timers: [],
+      giat: o.giat,
     }
     this.running.set(`${q.id}/${it.id}`, ra)
     this.updateQueue(q.id, (cur) => ({
@@ -2082,6 +2034,79 @@ export class Runner {
     if (exited) void exited.then((res) => this.finishAttempt(ra, res.code))
     else
       ra.timers.push(setInterval(() => void this.pollRemoteRun(ra), this.opts.remotePollMs ?? REMOTE_POLL_MS))
+  }
+
+  /** Caso do GI-App-Test: `node run.mjs` na pasta do projeto, no celular e no Appium que a fazenda escolheu. */
+  private async startGiatAttempt(q: Queue, it: Item, a: Assignment, index: number): Promise<void> {
+    const n = it.attempts.length + 1
+    const dir = this.p.attemptDir(q.id, it.id, n)
+    await fsp.mkdir(dir, { recursive: true })
+    const secrets = parseEnvFile(
+      await fsp.readFile(path.join(this.cfg.giatDir, ".env.server"), "utf8").catch(() => ""),
+    )
+    const env = giatEnv({
+      nodeBin: path.dirname(process.execPath),
+      sdkRoot: this.cfg.sdkRoot,
+      javaHome: this.cfg.javaHome,
+      home: process.env.HOME ?? "",
+      tmpDir: os.tmpdir(),
+      serial: a.serial,
+      appiumUrl: this.appium.url(index),
+      systemPort: portsFor(index, this.cfg.appiumBasePort, this.cfg.devicesPerAppium).system,
+      secrets,
+    })
+    const args = [
+      path.join(this.cfg.giatDir, "run.mjs"),
+      it.fileLongName,
+      "-d",
+      a.serial,
+      "--env",
+      q.env.toUpperCase(),
+      "--json",
+      path.join(dir, "giat.json"),
+      "--timeout",
+      String(q.options.timeoutSec),
+    ]
+    const spawned = launch(process.execPath, args, env, this.cfg.giatDir, path.join(dir, "console.log"))
+    await this.trackAttempt({ q, it, a, index, n, dir, pgid: spawned.pid, exited: spawned.exited, giat: true })
+  }
+
+  /** Prints citados no --json do run.mjs (só de dentro do projeto) vão para a pasta da tentativa. */
+  private async copyGiatShots(ra: RunningAttempt): Promise<void> {
+    const raw = await fsp.readFile(path.join(ra.dir, "giat.json"), "utf8").catch(() => undefined)
+    const base = await fsp.realpath(this.cfg.giatDir).catch(() => null)
+    if (!raw || !base) return
+    for (const r of giatResults(raw)) {
+      if (typeof r.shot !== "string" || !r.shot) continue
+      const src = await fsp.realpath(path.resolve(this.cfg.giatDir, r.shot)).catch(() => null)
+      if (!src || !src.startsWith(base + path.sep)) continue
+      await fsp.copyFile(src, path.join(ra.dir, path.basename(src).replace(/[^\w.-]/g, "_"))).catch(() => undefined)
+    }
+  }
+
+  /** Lista de casos do GI-App-Test (state: catalog/giat.json); null se o projeto não está no servidor. */
+  private async refreshGiatCatalog(): Promise<Catalog | null> {
+    if (!fs.existsSync(path.join(this.cfg.giatDir, "run.mjs"))) return null
+    try {
+      const env = giatEnv({
+        nodeBin: path.dirname(process.execPath),
+        sdkRoot: this.cfg.sdkRoot,
+        javaHome: this.cfg.javaHome,
+        home: process.env.HOME ?? "",
+        tmpDir: os.tmpdir(),
+        serial: "NENHUM", // só listar: nenhum celular permitido
+        appiumUrl: "http://127.0.0.1:1",
+        systemPort: 0,
+        secrets: {},
+      })
+      const cat = await buildGiatCatalog(this.cfg.giatDir, env, "")
+      this.giatCatalog = cat
+      await writeJsonAtomic(this.p.giatCatalog, cat)
+      return cat
+    } catch (e) {
+      this.log(`falha ao listar os casos do GI-App-Test: ${(e as Error).message}`)
+      return this.giatCatalog
+    }
   }
 
   /**
@@ -2215,10 +2240,21 @@ export class Runner {
     else if (ra.remote)
       this.remoteCleanup.push({ host: ra.remote.host, runId: ra.remote.runId, since: Date.now() })
     const read = (f: string) => fsp.readFile(path.join(ra.dir, f), "utf8").catch(() => undefined)
-    const outputXml = await read("output.xml")
+    const outputXml = ra.giat ? undefined : await read("output.xml")
     const consoleFull = (await read("console.log")) ?? ""
+    if (ra.giat) await this.copyGiatShots(ra)
     const files = await fsp.readdir(ra.dir).catch(() => [] as string[])
-    const result = classifyRun({
+    const shots = files.filter((f) => /\.(png|jpe?g)$/i.test(f)).sort()
+    const result = ra.giat
+      ? classifyGiat({
+          exitCode,
+          canceled: ra.canceled,
+          timedOut: ra.timedOut,
+          deviceLost: ra.deviceLost,
+          results: giatResults(await read("giat.json")),
+          screenshots: shots,
+        })
+      : classifyRun({
       exitCode,
       canceled: ra.canceled,
       timedOut: ra.timedOut,
@@ -2302,5 +2338,16 @@ export class Runner {
       desired: this.desired,
       maintenance: [...this.maintenance.keys()],
     }
+  }
+}
+
+/** results[] do --json do run.mjs (vazio se ausente ou inválido). */
+function giatResults(raw: string | undefined): GiatJsonResult[] {
+  if (!raw) return []
+  try {
+    const d = JSON.parse(raw) as { results?: unknown }
+    return Array.isArray(d.results) ? (d.results as GiatJsonResult[]) : []
+  } catch {
+    return []
   }
 }

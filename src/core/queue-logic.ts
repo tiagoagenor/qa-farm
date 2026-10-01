@@ -69,6 +69,7 @@ export function buildQueue(
       createdAt: now.toISOString(),
       appId: input.appId,
       env: input.env,
+      ...(input.project === "giat" ? { project: "giat" as const } : {}),
       status: "running",
       options,
       items,
