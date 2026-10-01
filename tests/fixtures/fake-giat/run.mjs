@@ -10,7 +10,7 @@ const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : undefined)
 if (a.includes("--list")) {
   const walk = (d) => fs.readdirSync(path.join(here, "tests", d), { withFileTypes: true }).flatMap((e) =>
     e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith(".mjs") ? [path.join(d, e.name)] : [])
-  const rels = walk("").filter((r) => !r.startsWith("flows/"))
+  const rels = walk("")
   console.log(JSON.stringify(rels.map((rel) => ({ rel, name: `Caso ${path.basename(rel, ".mjs")}`, tags: [] }))))
   process.exit(0)
 }

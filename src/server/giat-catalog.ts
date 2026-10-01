@@ -6,7 +6,7 @@ import type { Catalog } from "@/core/types"
 
 import { run } from "./exec"
 
-/** Casos do GI-App-Test: tests/**\/*.mjs, menos tests/flows/ (caminhos relativos a tests/). */
+/** Casos do GI-App-Test: todos os tests/**\/*.mjs (caminhos relativos a tests/). */
 export async function listGiatTests(dir: string): Promise<string[]> {
   const root = path.join(dir, "tests")
   const out: string[] = []

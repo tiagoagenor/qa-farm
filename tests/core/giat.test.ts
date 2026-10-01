@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { classifyGiat, giatEntry, giatEnv, parseEnvFile, validGiatTest } from "@/core/giat"
 
 describe("GI-App-Test", () => {
-  it("aceita só caminhos .mjs dentro de tests/, fora de flows/ e sem ..", () => {
+  it("aceita todo caminho .mjs dentro de tests/ (inclusive flows/) e recusa ..", () => {
     // Arrange
     const cases = ["smoke/app_abre.mjs", "flows/login.mjs", "../run.mjs", "smoke/../../x.mjs", "smoke/app.js", "/etc/x.mjs", "a//b.mjs"]
 
@@ -11,7 +11,7 @@ describe("GI-App-Test", () => {
     const ok = cases.map(validGiatTest)
 
     // Assert
-    expect(ok).toEqual([true, false, false, false, false, false, false])
+    expect(ok).toEqual([true, true, false, false, false, false, false])
   })
 
   it("caso vira entrada do catálogo com a pasta de tests/ e o nome do --list", () => {

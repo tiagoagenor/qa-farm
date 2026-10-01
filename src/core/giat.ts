@@ -20,12 +20,11 @@ export const PROJECT_ENVS = { robot: ["hml", "dev", "pre"], giat: ["hml", "prod"
 
 export const GIAT_ID_PREFIX = "giat:"
 
-/** Caso válido: caminho relativo a tests/, terminando em .mjs, sem "..", fora de tests/flows/. */
+/** Caso válido: caminho relativo a tests/, terminando em .mjs, sem "..". Tudo em tests/ é caso (o que não for, fica fora de tests/). */
 export function validGiatTest(test: string): boolean {
   if (!/^[\w][\w./-]*\.mjs$/.test(test)) return false
   const parts = test.split("/")
-  if (parts.some((s) => s === ".." || s === "." || s === "")) return false
-  return parts[0] !== "flows"
+  return !parts.some((s) => s === ".." || s === "." || s === "")
 }
 
 /** Entrada do catálogo a partir do caminho relativo a tests/ (nome bonito opcional, vindo do `run.mjs --list`). */

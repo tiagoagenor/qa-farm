@@ -50,9 +50,10 @@ describe("GI-App-Test nas filas", () => {
       /· HML · http:\/\/127\.0\.0\.1:48\d\d\/wd\/hub · systemPort 82\d\d/.test(consoleLog),
       giatJson.results[0].leak,
     ]).toEqual([
-      ["Caso app_abre", "Caso ct_login_01_valido", "Caso ct_login_02_FAIL", "Caso ct_login_03_INFRA"],
+      ["Caso app_abre", "Caso ct_login_01_valido", "Caso ct_login_02_FAIL", "Caso ct_login_03_INFRA", "Caso login"],
       "giat",
       {
+        "flows/login.mjs": "passed",
         "login/ct_login_01_valido.mjs": "passed",
         "login/ct_login_02_FAIL.mjs": "failed",
         "login/ct_login_03_INFRA.mjs": "infra_error",
